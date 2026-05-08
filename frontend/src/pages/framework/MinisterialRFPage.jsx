@@ -82,7 +82,7 @@ export default function MinisterialRFPage() {
   // Role-based access: restricted users see only their own dept
   const accessibleCodes = useMemo(() => {
     if (!isRestricted) return null; // null = all
-    // Map user's dept/unit to a code — in real app use user.departmentCode or similar
+    // Map user's dept/unit to a code: in real app use user.departmentCode or similar
     return [user?.departmentCode || user?.unitCode].filter(Boolean);
   }, [isRestricted, user]);
 
@@ -187,7 +187,7 @@ export default function MinisterialRFPage() {
           <div className="flex items-center gap-2 mb-1">
             <img src="/tanzania-emblem.svg" alt="MIT" className="w-7 h-7 drop-shadow shrink-0" />
             <div>
-              <p className="text-xs font-bold text-white leading-tight">MIT - Headquarters</p>
+              <p className="text-xs font-bold text-white leading-tight">MIT Headquarters</p>
               <p className="text-[10px] text-blue-200">Dodoma · FY 2025/2026</p>
             </div>
           </div>
@@ -266,15 +266,15 @@ export default function MinisterialRFPage() {
                 <>
                   <span className="text-xl">{selectedMeta.icon}</span>
                   <div>
-                    <h1 className="text-base font-bold text-gray-900 leading-tight">{selected} - {selectedMeta.label}</h1>
-                    <p className="text-[10px] text-gray-400">Results Framework · FY {FISCAL_YEAR} · Sub-Vote {selectedData && DEPT_DATA[selected]?.subVote}</p>
+                    <h1 className="text-base font-bold text-gray-900 leading-tight">{selected}: {selectedMeta.label}</h1>
+                    <p className="text-[10px] text-gray-400">Results Framework · FY {FISCAL_YEAR} · Sub Vote {selectedData && DEPT_DATA[selected]?.subVote}</p>
                   </div>
                 </>
               ) : (
                 <>
                   <TableCellsIcon className="w-5 h-5 text-[#1a3a5c] shrink-0" />
                   <div>
-                    <h1 className="text-base font-bold text-gray-900 leading-tight">MIT Results Framework - Ministerial View</h1>
+                    <h1 className="text-base font-bold text-gray-900 leading-tight">MIT Results Framework: Ministerial View</h1>
                     <p className="text-[10px] text-gray-400">All Departments and Units · Headquarters Dodoma · FY {FISCAL_YEAR}</p>
                   </div>
                 </>
@@ -395,7 +395,7 @@ function RFEntityBlock({ code, data, period, expanded, expandedOps, onToggleObj,
             <span className={`text-sm font-extrabold ${meta.textColor || 'text-gray-800'}`}>{code}</span>
             <span className="text-xs text-gray-600 ml-2">{meta.label}</span>
           </div>
-          <span className="text-xs text-gray-500 font-medium">Sub-Vote: {DEPT_DATA[code]?.subVote}</span>
+          <span className="text-xs text-gray-500 font-medium">Sub Vote: {DEPT_DATA[code]?.subVote}</span>
           <span className="text-xs font-semibold text-blue-700">Budget: TZS {fmt(data.budget)}</span>
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
             meta.type === 'unit' ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-blue-50 text-blue-700 border-blue-200'
@@ -527,7 +527,7 @@ function RFEntityBlock({ code, data, period, expanded, expandedOps, onToggleObj,
       {/* Entity footer */}
       {!showEntityHeader && (
         <div className="bg-gray-50 border-t border-gray-100 px-5 py-2 flex items-center gap-4 text-[10px] text-gray-400">
-          <span>Sub-Vote: <strong className="text-gray-600">{data.subVote}</strong></span>
+          <span>Sub Vote: <strong className="text-gray-600">{data.subVote}</strong></span>
           <span>Budget: <strong className="text-blue-600">TZS {fmt(data.budget)}</strong></span>
           <span>{data.objectives.length} objective{data.objectives.length !== 1 ? 's' : ''}</span>
           <span>{data.objectives.reduce((s, o) => s + o.outputs.length, 0)} outputs</span>

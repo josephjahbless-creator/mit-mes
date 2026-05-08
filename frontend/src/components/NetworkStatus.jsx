@@ -36,7 +36,7 @@ export default function NetworkStatus() {
     }`}>
       {online
         ? <><WifiIcon className="w-4 h-4" /> Connection restored</>
-        : <><ExclamationTriangleIcon className="w-4 h-4" /> No internet connection — changes may not save</>
+        : <><ExclamationTriangleIcon className="w-4 h-4" /> No internet connection: changes may not save</>
       }
     </div>
   );

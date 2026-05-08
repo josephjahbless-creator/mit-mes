@@ -1,0 +1,20 @@
+{
+  "name": "MIT M&E System",
+  "short_name": "MIT M&E",
+  "description": "Ministry of Industry and Trade — Monitoring & Evaluation System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e3a5f",
+  "theme_color": "#1e3a5f",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/tanzania-emblem.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "government"],
+  "lang": "en"
+}

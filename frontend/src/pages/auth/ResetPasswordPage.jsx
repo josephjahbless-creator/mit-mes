@@ -83,7 +83,7 @@ export default function ResetPasswordPage() {
       <div className="bg-white rounded-2xl shadow-lg w-full max-w-sm overflow-hidden">
         <div className="bg-mit-blue px-6 py-5">
           <h1 className="text-white font-bold text-lg">Set New Password</h1>
-          <p className="text-blue-300 text-xs mt-0.5">Ministry of Industry & Trade — M&amp;E System</p>
+          <p className="text-blue-300 text-xs mt-0.5">Ministry of Industry & Trade: M&amp;E System</p>
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
           <div>

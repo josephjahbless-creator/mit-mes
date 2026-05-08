@@ -61,6 +61,142 @@ function GaugeBar({ label, pct, color }) {
   );
 }
 
+// ── Gantt Chart ───────────────────────────────────────────────────────────────
+function GanttChart({ project }) {
+  const start = project.startDate ? new Date(project.startDate) : null;
+  const end   = project.endDate   ? new Date(project.endDate)   : null;
+
+  // Determine chart timeline bounds
+  const allDates = [
+    start,
+    end,
+    ...project.milestones.map(m => m.dueDate ? new Date(m.dueDate) : null),
+    ...project.activities.map(a => a.dueDate  ? new Date(a.dueDate)  : null),
+  ].filter(Boolean);
+
+  if (allDates.length === 0) return null;
+
+  const minDate = new Date(Math.min(...allDates));
+  const maxDate = new Date(Math.max(...allDates));
+  // Pad 5% on each side
+  const span = maxDate - minDate || 1;
+  const chartStart = new Date(minDate - span * 0.05);
+  const chartEnd   = new Date(maxDate + span * 0.07);
+  const total      = chartEnd - chartStart;
+
+  const pct = (d) => d ? Math.max(0, Math.min(100, ((new Date(d) - chartStart) / total) * 100)) : null;
+  const today = new Date();
+  const todayPct = pct(today);
+
+  // Build month labels
+  const months = [];
+  const cur = new Date(chartStart.getFullYear(), chartStart.getMonth(), 1);
+  while (cur <= chartEnd) {
+    months.push({ label: cur.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }), pct: pct(cur) });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  const rows = [
+    // Project overall bar
+    ...(start && end ? [{ label: project.name, type: 'project', from: pct(start), to: pct(end), done: project.status === 'completed' }] : []),
+    // Milestones
+    ...project.milestones.map(m => ({
+      label: m.title,
+      type: 'milestone',
+      at: pct(m.dueDate),
+      done: m.status === 'completed',
+      late: m.dueDate && m.status !== 'completed' && new Date(m.dueDate) < today,
+    })),
+    // Activities with due dates
+    ...project.activities.filter(a => a.dueDate).map(a => ({
+      label: a.name,
+      type: 'activity',
+      at: pct(a.dueDate),
+      done: a.isCompleted,
+      late: !a.isCompleted && new Date(a.dueDate) < today,
+    })),
+  ];
+
+  return (
+    <SectionCard title="Project Timeline (Gantt)" icon={CalendarDaysIcon} accent="blue">
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: 540 }}>
+          {/* Month ruler */}
+          <div className="relative h-6 border-b border-gray-200 mb-1">
+            {months.map((m, i) => (
+              <span key={i} className="absolute text-[10px] text-gray-400 font-mono"
+                style={{ left: `${m.pct}%`, transform: 'translateX(-50%)' }}>
+                {m.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Today line */}
+          {todayPct >= 0 && todayPct <= 100 && (
+            <div className="absolute h-full border-l-2 border-red-400/60 border-dashed z-10 pointer-events-none"
+              style={{ left: `${todayPct}%` }} />
+          )}
+
+          {/* Rows */}
+          <div className="space-y-2 relative">
+            {/* Today marker overlay */}
+            {todayPct >= 0 && todayPct <= 100 && (
+              <div className="absolute top-0 bottom-0 w-0.5 bg-red-400/40 z-10 pointer-events-none"
+                style={{ left: `${todayPct}%` }} />
+            )}
+
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-center gap-2" style={{ minHeight: 24 }}>
+                {/* Label */}
+                <div className="w-36 shrink-0 text-xs text-gray-600 truncate text-right pr-2" title={row.label}>
+                  {row.label}
+                </div>
+                {/* Bar area */}
+                <div className="flex-1 relative h-5 bg-gray-100 rounded">
+                  {row.type === 'project' && (
+                    <div
+                      className={`absolute h-full rounded transition-all ${row.done ? 'bg-green-500' : 'bg-blue-500'}`}
+                      style={{ left: `${row.from}%`, width: `${Math.max(row.to - row.from, 1)}%` }}
+                    />
+                  )}
+                  {(row.type === 'milestone' || row.type === 'activity') && row.at != null && (
+                    <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
+                      style={{ left: `${row.at}%` }}>
+                      {row.type === 'milestone' ? (
+                        <div className={`w-3.5 h-3.5 rotate-45 border-2 ${
+                          row.done ? 'bg-green-500 border-green-600' :
+                          row.late ? 'bg-red-400 border-red-500' :
+                          'bg-amber-400 border-amber-500'
+                        }`} title={row.label} />
+                      ) : (
+                        <div className={`w-2.5 h-2.5 rounded-full border-2 ${
+                          row.done ? 'bg-green-500 border-green-600' :
+                          row.late ? 'bg-red-400 border-red-500' :
+                          'bg-gray-400 border-gray-500'
+                        }`} title={row.label} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div className="flex gap-4 mt-3 text-[10px] text-gray-500 flex-wrap">
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded bg-blue-500 inline-block" /> Project Bar</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rotate-45 bg-amber-400 border border-amber-500 inline-block" /> Milestone</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 border border-gray-500 inline-block" /> Activity</span>
+            <span className="flex items-center gap-1"><span className="w-0.5 h-3 bg-red-400/60 inline-block border-l border-dashed border-red-400" /> Today</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded bg-green-500 inline-block" /> Completed</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded bg-red-400 inline-block" /> Overdue</span>
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 // ── Inline form components ────────────────────────────────────────────────────
 function MilestoneForm({ projectId, initial, onDone, isPending }) {
   const EMPTY = { title: '', description: '', dueDate: '', status: 'not_started', orderNo: '' };
@@ -308,6 +444,11 @@ export default function ProjectDetailPage() {
           <GaugeBar label="Activities Completed" pct={m.actPct ?? 0} />
         </div>
       </SectionCard>
+
+      {/* Gantt Chart */}
+      {(project.startDate || project.endDate || project.milestones.length > 0 || project.activities.length > 0) && (
+        <GanttChart project={project} />
+      )}
 
       {/* Milestones */}
       <SectionCard title="Milestones" icon={FlagIcon} accent="amber">

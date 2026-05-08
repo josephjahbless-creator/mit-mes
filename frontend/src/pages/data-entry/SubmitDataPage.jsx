@@ -14,6 +14,7 @@ import {
   ArrowPathIcon, CheckBadgeIcon, Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 import { getCurrentFiscalYear } from '../../utils/fiscalYear';
+import { FORMULA_META, previewCalculate, statusColor, statusBadge } from '../../utils/formulaMeta';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const FISCAL_YEAR   = getCurrentFiscalYear();
@@ -368,7 +369,7 @@ function ConfirmModal({ data, onConfirm, onCancel, isPending }) {
       <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5">
           <h2 className="text-lg font-bold text-white">Confirm Submission</h2>
-          <p className="text-blue-100 text-sm mt-1">Review carefully — data is locked after submission</p>
+          <p className="text-blue-100 text-sm mt-1">Review carefully: data is locked after submission</p>
         </div>
         <div className="p-6 space-y-4">
           <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
@@ -411,7 +412,7 @@ export default function SubmitDataPage() {
   // Wizard step
   const [step, setStep] = useState(1);
 
-  // Step 1 — Entity
+  // Step 1: Entity
   const [entityType,   setEntityType]   = useState('institution'); // 'institution' | 'department'
   const [entityId,     setEntityId]     = useState('');
   const [entityKind,   setEntityKind]   = useState('');     // 'institution' | 'department' | 'unit'
@@ -421,19 +422,25 @@ export default function SubmitDataPage() {
   const [resolvedUnitId,        setResolvedUnitId]        = useState('');
   const [entityLabel,  setEntityLabel]  = useState('');
 
-  // Step 2 — Period
+  // Step 2: Period
   const [period,         setPeriod]         = useState('');
   const [submissionDate, setSubmissionDate]  = useState(() => new Date().toISOString().slice(0, 10));
 
-  // Step 3 — Framework selection
+  // Step 3: Framework selection
   const [activityId,  setActivityId]  = useState('');
   const [indicatorId, setIndicatorId] = useState('');
 
-  // Step 4 — Data
-  const [progressVal, setProgressVal] = useState('');
-  const [remarks,     setRemarks]     = useState('');
-  const [attachments, setAttachments] = useState([]);
-  const [uploading,   setUploading]   = useState(false);
+  // Step 4: Data
+  const [progressVal,  setProgressVal]  = useState('');
+  const [binaryVal,    setBinaryVal]    = useState(null);  // for 'binary' formula
+  const [extraFields,  setExtraFields]  = useState({});   // formula-specific extra inputs
+  const [remarks,      setRemarks]      = useState('');
+  const [attachments,  setAttachments]  = useState([]);
+  const [uploading,    setUploading]    = useState(false);
+
+  // GPS location
+  const [location, setLocation] = useState(null); // { lat, lng, name }
+  const [gpsLoading, setGpsLoading] = useState(false);
 
   // Confirm modal
   const [showConfirm, setShowConfirm] = useState(false);
@@ -487,7 +494,7 @@ export default function SubmitDataPage() {
     enabled: isSuperOrME,
   });
 
-  // Chain API — only fetch once entity is resolved
+  // Chain API: only fetch once entity is resolved
   const chainParams = useMemo(() => {
     const p = {};
     if (resolvedUnitId)        p.unitId        = resolvedUnitId;
@@ -574,6 +581,8 @@ export default function SubmitDataPage() {
     setActivityId(id);
     setIndicatorId('');
     setProgressVal('');
+    setExtraFields({});
+    setBinaryVal(null);
   }
 
   async function handleFileUpload(e) {
@@ -587,7 +596,7 @@ export default function SubmitDataPage() {
       const res = await dataEntryApi.uploadFiles(fd);
       setAttachments(prev => [...prev, ...res.data.urls]);
       toast.success(`${files.length} file(s) uploaded`);
-    } catch { toast.error('Upload failed — PDF, PNG or JPEG only, max 10 MB'); }
+    } catch { toast.error('Upload failed: PDF, PNG or JPEG only, max 10 MB'); }
     finally  { setUploading(false); }
   }
 
@@ -596,6 +605,51 @@ export default function SubmitDataPage() {
     onSuccess: () => { toast.success('Activity submitted successfully!'); navigate('/data-entry'); },
     onError: err => { toast.error(err.response?.data?.error || 'Submission failed'); setShowConfirm(false); },
   });
+
+  async function captureGPS() {
+    if (!navigator.geolocation) { toast.error('Geolocation is not supported by your browser'); return; }
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        // Reverse geocode using OpenStreetMap Nominatim (free, no key)
+        let name = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        try {
+          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          const d = await r.json();
+          name = d.display_name?.split(',').slice(0, 3).join(', ') || name;
+        } catch {}
+        setLocation({ lat: latitude, lng: longitude, name });
+        setGpsLoading(false);
+        toast.success('Location captured');
+      },
+      () => { toast.error('Unable to get location. Please allow location access.'); setGpsLoading(false); },
+      { timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
+  const ind = selIndicator?.ind;
+  const formulaType = ind?.formulaType || 'achievement_pct';
+  const formulaConfig = ind?.formulaConfig || {};
+  const isBinaryFormula = formulaType === 'binary';
+
+  // Effective actual value: binary uses 1/0, others use progressNum
+  const effectiveActual = isBinaryFormula
+    ? (binaryVal === true ? 1 : binaryVal === false ? 0 : null)
+    : progressNum;
+
+  // Live preview result
+  const livePreview = useMemo(() => {
+    if (effectiveActual == null && !isBinaryFormula) return null;
+    const a = isBinaryFormula ? effectiveActual : progressNum;
+    if (a == null || a === '' || isNaN(Number(a))) return null;
+    return previewCalculate(formulaType, formulaConfig, {
+      actualValue:   Number(a),
+      baselineValue: ind?.baselineValue,
+      target:        periodTarget,
+      extraFields:   isBinaryFormula ? {} : extraFields,
+    });
+  }, [formulaType, formulaConfig, effectiveActual, progressNum, periodTarget, extraFields, ind, isBinaryFormula]);
 
   const handleConfirmSubmit = () => mutateAsync({
     indicatorId,
@@ -606,14 +660,19 @@ export default function SubmitDataPage() {
     unitId:        resolvedUnitId        || null,
     fiscalYear:    FISCAL_YEAR,
     reportingPeriod: period,
-    actualValue:   progressNum,
+    actualValue:   effectiveActual,
+    extraFields:   Object.keys(extraFields).length > 0 ? extraFields : undefined,
     remarks:       remarks || null,
     submissionDate,
     attachments,
+    latitude:     location?.lat || null,
+    longitude:    location?.lng || null,
+    locationName: location?.name || null,
   });
 
   const canProceedStep3 = !!activityId && !!indicatorId;
-  const canSubmit = canProceedStep3 && period && progressVal !== '' && !exceedsTarget && !wcExceeds && !!submissionDate;
+  const hasValue = isBinaryFormula ? binaryVal !== null : (progressVal !== '' && effectiveActual != null);
+  const canSubmit = canProceedStep3 && period && hasValue && !exceedsTarget && !wcExceeds && !!submissionDate;
 
   const confirmData = {
     fiscalYear:     FISCAL_YEAR,
@@ -669,7 +728,7 @@ export default function SubmitDataPage() {
       <StepBar current={step} />
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* STEP 1 — ENTITY SELECTION (super_admin / me_officer only) */}
+      {/* STEP 1: ENTITY SELECTION (super_admin / me_officer only) */}
       {/* ════════════════════════════════════════════════════════ */}
       {step === 1 && (
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
@@ -773,7 +832,7 @@ export default function SubmitDataPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* STEP 2 — PERIOD SELECTION                               */}
+      {/* STEP 2: PERIOD SELECTION                               */}
       {/* ════════════════════════════════════════════════════════ */}
       {step === 2 && (
         <div className="space-y-4">
@@ -800,7 +859,7 @@ export default function SubmitDataPage() {
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Reporting Period</p>
-              <p className="text-xs text-gray-400 mt-0.5">Select the period this report covers — FY {FISCAL_YEAR}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Select the period this report covers: FY {FISCAL_YEAR}</p>
             </div>
             <div className="px-6 py-5">
               <div className="grid grid-cols-5 gap-2">
@@ -860,7 +919,7 @@ export default function SubmitDataPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* STEP 3 — FRAMEWORK / IMPLEMENTATION SELECTION           */}
+      {/* STEP 3: FRAMEWORK / IMPLEMENTATION SELECTION           */}
       {/* ════════════════════════════════════════════════════════ */}
       {step === 3 && (
         <div className="space-y-4">
@@ -948,7 +1007,7 @@ export default function SubmitDataPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* STEP 4 — DATA ENTRY                                     */}
+      {/* STEP 4: DATA ENTRY                                     */}
       {/* ════════════════════════════════════════════════════════ */}
       {step === 4 && (
         <div className="space-y-5">
@@ -1011,49 +1070,239 @@ export default function SubmitDataPage() {
                   </div>
                 </div>
 
-                {/* Progress input */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Progress Achieved <span className="text-red-400">*</span>
-                    <span className="text-xs text-gray-400 font-normal ml-1">({selIndicator.ind.unit})</span>
-                  </label>
-                  <input
-                    type="number" step="any" min="0"
-                    className={`w-full rounded-xl border-2 px-4 py-3 text-xl font-bold outline-none transition-all ${
-                      exceedsTarget
-                        ? 'border-red-400 bg-red-50 focus:border-red-500 text-red-700'
-                        : progressVal
-                        ? 'border-green-300 bg-green-50/30 focus:border-green-400 text-gray-900'
-                        : 'border-gray-200 bg-white focus:border-blue-400 text-gray-900'
-                    }`}
-                    placeholder={`Enter numeric value in ${selIndicator.ind.unit}`}
-                    value={progressVal}
-                    onChange={e => setProgressVal(e.target.value)}
-                  />
-
-                  {exceedsTarget && (
-                    <div className="mt-3 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
-                      <ExclamationTriangleIcon className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                {/* ── Formula badge ──────────────────────────────────── */}
+                {(() => {
+                  const fm = FORMULA_META[formulaType];
+                  if (!fm) return null;
+                  return (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 border border-gray-100">
+                      <InformationCircleIcon className="w-4 h-4 text-blue-500 flex-shrink-0" />
                       <div>
-                        <p className="text-sm font-bold text-red-700">Value Exceeds Target</p>
-                        <p className="text-xs text-red-600 mt-0.5">
-                          Entered value ({progressNum.toLocaleString()}) exceeds the {period} target ({periodTarget?.toLocaleString()}). Please verify.
-                        </p>
+                        <span className="text-xs font-bold text-gray-700">{fm.label}</span>
+                        <span className="text-xs text-gray-400 ml-1.5 font-mono">{fm.description}</span>
                       </div>
                     </div>
-                  )}
+                  );
+                })()}
 
-                  {progressPct != null && !exceedsTarget && (
-                    <div className="mt-3"><ProgressMeter pct={progressPct} /></div>
-                  )}
+                {/* ── Binary (Yes/No) ─────────────────────────────────── */}
+                {isBinaryFormula ? (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-3">
+                      Was this milestone achieved? <span className="text-red-400">*</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[{ v: true, label: '✓ Yes — Achieved', cls: binaryVal === true ? 'bg-green-600 text-white border-green-600' : 'border-gray-200 hover:border-green-400 text-gray-700' },
+                        { v: false, label: '✗ No — Not achieved', cls: binaryVal === false ? 'bg-red-500 text-white border-red-500' : 'border-gray-200 hover:border-red-300 text-gray-700' },
+                      ].map(({ v, label, cls }) => (
+                        <button key={String(v)} type="button"
+                          onClick={() => setBinaryVal(v)}
+                          className={`py-4 rounded-xl border-2 text-sm font-bold transition-all ${cls}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {binaryVal !== null && (
+                      <div className={`mt-3 p-3 rounded-xl text-sm font-semibold text-center ${
+                        binaryVal ? 'bg-green-50 text-green-700 border border-green-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                      }`}>
+                        Achievement: {binaryVal ? '100%' : '0%'}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {/* ── Main value input ─────────────────────────────── */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        {FORMULA_META[formulaType]?.inputLabel || 'Progress Achieved'}{' '}
+                        <span className="text-red-400">*</span>
+                        <span className="text-xs text-gray-400 font-normal ml-1">
+                          ({selIndicator.ind.unit})
+                        </span>
+                      </label>
+                      <input
+                        type="number" step="any" min="0"
+                        className={`w-full rounded-xl border-2 px-4 py-3 text-xl font-bold outline-none transition-all ${
+                          exceedsTarget
+                            ? 'border-red-400 bg-red-50 focus:border-red-500 text-red-700'
+                            : progressVal
+                            ? 'border-green-300 bg-green-50/30 focus:border-green-400 text-gray-900'
+                            : 'border-gray-200 bg-white focus:border-blue-400 text-gray-900'
+                        }`}
+                        placeholder={`Enter numeric value in ${selIndicator.ind.unit}`}
+                        value={progressVal}
+                        onChange={e => setProgressVal(e.target.value)}
+                      />
+                    </div>
 
-                  {!exceedsTarget && periodTarget == null && progressVal && (
-                    <p className="mt-2 text-xs text-amber-600 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />
-                      No target set for {period} — progress recorded but performance % cannot be calculated.
-                    </p>
-                  )}
-                </div>
+                    {/* ── Formula extra fields ──────────────────────────── */}
+                    {(() => {
+                      const fm = FORMULA_META[formulaType];
+                      const dynFields = fm?.extraFields;
+                      if (!dynFields || dynFields === 'dynamic' || !Array.isArray(dynFields) || dynFields.length === 0) return null;
+                      return (
+                        <div className="space-y-3 border border-dashed border-blue-200 rounded-xl p-4 bg-blue-50/30">
+                          <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
+                            Additional Inputs for {fm.label}
+                          </p>
+                          {dynFields.map(f => (
+                            <div key={f.key}>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                {f.label}
+                                {f.required && <span className="text-red-400 ml-1">*</span>}
+                              </label>
+                              <input
+                                type={f.type || 'number'} step="any"
+                                className="input"
+                                placeholder={f.hint || ''}
+                                value={extraFields[f.key] || ''}
+                                onChange={e => setExtraFields(prev => ({ ...prev, [f.key]: e.target.value }))}
+                              />
+                              {f.hint && (
+                                <p className="text-[11px] text-gray-400 mt-0.5">{f.hint}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Sub-indicator inputs for multi_input ─────────── */}
+                    {formulaType === 'multi_input' && (() => {
+                      const subs = formulaConfig?.subIndicators;
+                      if (!subs?.length) return (
+                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                          No sub-indicators configured for this indicator. Contact your M&E officer.
+                        </p>
+                      );
+                      return (
+                        <div className="border border-dashed border-purple-200 rounded-xl p-4 bg-purple-50/20 space-y-3">
+                          <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">Sub-indicator Values</p>
+                          {subs.map(s => (
+                            <div key={s.key}>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1">{s.label}</label>
+                              <input
+                                type="number" step="any" className="input"
+                                placeholder={`Enter value for ${s.label}`}
+                                value={extraFields[s.key] || ''}
+                                onChange={e => setExtraFields(prev => ({ ...prev, [s.key]: e.target.value }))}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Sub-indicator inputs for weighted_score ──────── */}
+                    {formulaType === 'weighted_score' && (() => {
+                      const subs = formulaConfig?.subIndicators;
+                      if (!subs?.length) return (
+                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                          No dimensions configured for this composite indicator.
+                        </p>
+                      );
+                      return (
+                        <div className="border border-dashed border-purple-200 rounded-xl p-4 bg-purple-50/20 space-y-3">
+                          <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">
+                            Dimension Values — Weighted Score
+                          </p>
+                          {subs.map(s => (
+                            <div key={s.key} className="flex items-center gap-3">
+                              <div className="flex-1">
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                  {s.label}
+                                  {s.weight && (
+                                    <span className="ml-1.5 text-[10px] text-purple-600 font-bold">
+                                      {Math.round(s.weight * 100)}% weight
+                                    </span>
+                                  )}
+                                </label>
+                                <input
+                                  type="number" step="any" className="input"
+                                  placeholder={s.target ? `Target: ${s.target}` : 'Enter value'}
+                                  value={extraFields[s.key] || ''}
+                                  onChange={e => setExtraFields(prev => ({ ...prev, [s.key]: e.target.value }))}
+                                />
+                              </div>
+                              {s.target && extraFields[s.key] && (
+                                <div className="text-center min-w-[52px]">
+                                  <p className="text-[10px] text-gray-400">vs target</p>
+                                  <p className={`text-sm font-bold ${
+                                    (parseFloat(extraFields[s.key]) / s.target) >= 1
+                                      ? 'text-green-600' : 'text-amber-600'
+                                  }`}>
+                                    {Math.min(Math.round((parseFloat(extraFields[s.key]) / s.target) * 100), 100)}%
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Live calculation preview ──────────────────────── */}
+                    {livePreview && (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Live Calculation</p>
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500">Result</p>
+                            <p className="text-xl font-extrabold text-gray-900">
+                              {livePreview.displayValue || String(livePreview.result)}
+                            </p>
+                          </div>
+                          {livePreview.achievementPct != null && (
+                            <div>
+                              <p className="text-xs text-gray-500">Achievement</p>
+                              <p className={`text-xl font-extrabold ${statusColor(livePreview.achievementPct)}`}>
+                                {livePreview.achievementPct}%
+                              </p>
+                            </div>
+                          )}
+                          {livePreview.achievementPct != null && (() => {
+                            const b = statusBadge(livePreview.achievementPct);
+                            return (
+                              <span className={`self-end px-3 py-1 rounded-full text-xs font-bold ${b.cls}`}>
+                                {b.label}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        {livePreview.achievementPct != null && (
+                          <div className="mt-3">
+                            <ProgressMeter pct={Math.min(livePreview.achievementPct, 150)} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {exceedsTarget && formulaType === 'achievement_pct' && (
+                      <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
+                        <ExclamationTriangleIcon className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-bold text-red-700">Value Exceeds Target</p>
+                          <p className="text-xs text-red-600 mt-0.5">
+                            Entered value ({progressNum.toLocaleString()}) exceeds the {period} target ({periodTarget?.toLocaleString()}). Please verify.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {!livePreview && progressPct != null && !exceedsTarget && (
+                      <div className="mt-3"><ProgressMeter pct={progressPct} /></div>
+                    )}
+
+                    {periodTarget == null && progressVal && formulaType === 'achievement_pct' && (
+                      <p className="text-xs text-amber-600 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />
+                        No target set for {period}: progress recorded but performance % cannot be calculated.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -1089,7 +1338,7 @@ export default function SubmitDataPage() {
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
             <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/60">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Supporting Evidence</p>
-              <p className="text-xs text-gray-400 mt-0.5">Upload files for physical verification — PDF, PNG or JPEG, max 10 MB</p>
+              <p className="text-xs text-gray-400 mt-0.5">Upload files for physical verification: PDF, PNG or JPEG, max 10 MB</p>
             </div>
             <div className="p-5 space-y-3">
               <label className={`flex items-center gap-4 rounded-xl border-2 border-dashed px-5 py-4 cursor-pointer transition-all ${
@@ -1117,6 +1366,43 @@ export default function SubmitDataPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          </div>
+
+          {/* GPS Location capture */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="bg-gray-50 px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+              <span className="text-base">📍</span>
+              <h3 className="font-semibold text-gray-800 text-sm">GPS Location <span className="text-xs text-gray-400 font-normal">(optional)</span></h3>
+            </div>
+            <div className="p-5">
+              {location ? (
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{location.name}</p>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">{location.lat.toFixed(6)}, {location.lng.toFixed(6)}</p>
+                  </div>
+                  <button type="button" onClick={() => setLocation(null)} className="text-gray-400 hover:text-red-500">
+                    <XMarkIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={captureGPS}
+                  disabled={gpsLoading}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all w-full"
+                >
+                  {gpsLoading
+                    ? <ArrowPathIcon className="w-5 h-5 text-blue-500 animate-spin" />
+                    : <span className="text-xl">📍</span>
+                  }
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-gray-700">{gpsLoading ? 'Getting location…' : 'Capture GPS Location'}</p>
+                    <p className="text-xs text-gray-400">Records where this data was collected</p>
+                  </div>
+                </button>
               )}
             </div>
           </div>

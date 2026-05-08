@@ -73,7 +73,7 @@ export default function ChangePasswordModal({ onClose }) {
     try {
       await authApi.changePassword({ currentPassword, newPassword });
       toast.success('Password changed. Please log in again.');
-      // Server invalidated all sessions — log out locally
+      // Server invalidated all sessions: log out locally
       try { await authApi.logout(refreshToken); } catch {}
       logout();
       navigate('/login');

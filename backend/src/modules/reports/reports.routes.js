@@ -11,7 +11,9 @@ router.get('/indicator/:id', controller.indicatorReport);
 router.get('/institution/:id', controller.institutionReport);
 router.get('/consolidated', controller.consolidatedReport);
 // exports restricted to admin-level roles
-router.post('/export/excel', authorize('super_admin', 'me_officer', 'admin'), controller.exportExcel);
-router.post('/export/pdf',   authorize('super_admin', 'me_officer', 'admin'), controller.exportPdf);
+router.post('/export/excel',      authorize('super_admin', 'me_officer', 'admin'), controller.exportExcel);
+router.post('/export/pdf',        authorize('super_admin', 'me_officer', 'admin'), controller.exportPdf);
+router.post('/export/pdf-server', authorize('super_admin', 'me_officer', 'admin'), controller.exportPdfServer);
+router.post('/export/docx',       authorize('super_admin', 'me_officer', 'admin'), controller.exportDocx);
 
 module.exports = router;

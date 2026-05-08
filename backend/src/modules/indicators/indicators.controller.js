@@ -166,6 +166,9 @@ async function create(req, res) {
     outputId, name, code, unit, dataSource, formulaType, formulaConfig,
     responsiblePerson, reportingFrequency, baselineValue, baselineYear,
     ownerType, ownerInstitutionId, ownerDepartmentId, ownerUnitId,
+    indicatorType, progressDirection, indicatorStatus,
+    description, collectionMethod, verificationSource,
+    minValue, maxValue,
   } = req.body;
 
   // Validate: exactly one owner must be set when ownerType is provided
@@ -183,12 +186,21 @@ async function create(req, res) {
   try {
     const indicator = await prisma.indicator.create({
       data: {
-        outputId, name, code, unit, dataSource, formulaType, formulaConfig,
+        outputId, name, code, unit: unit || 'Number',
+        dataSource, formulaType, formulaConfig,
         responsiblePerson, reportingFrequency, baselineValue, baselineYear,
         ownerType: ownerType || null,
         ownerInstitutionId: ownerType === 'Institution' ? ownerInstitutionId : null,
         ownerDepartmentId:  ownerType === 'Department'  ? ownerDepartmentId  : null,
         ownerUnitId:        ownerType === 'Unit'        ? ownerUnitId        : null,
+        indicatorType:      indicatorType    || null,
+        progressDirection:  progressDirection || 'increasing',
+        indicatorStatus:    indicatorStatus   || 'active',
+        description:        description       || null,
+        collectionMethod:   collectionMethod  || null,
+        verificationSource: verificationSource || null,
+        minValue:           minValue != null ? Number(minValue) : null,
+        maxValue:           maxValue != null ? Number(maxValue) : null,
         createdById: req.user.id,
       },
       include: OWNER_INCLUDE,
@@ -205,6 +217,9 @@ async function update(req, res) {
     name, unit, dataSource, formulaType, formulaConfig,
     responsiblePerson, reportingFrequency, baselineValue, baselineYear, isActive,
     ownerType, ownerInstitutionId, ownerDepartmentId, ownerUnitId,
+    indicatorType, progressDirection, indicatorStatus,
+    description, collectionMethod, verificationSource,
+    minValue, maxValue,
   } = req.body;
 
   const data = {
@@ -219,6 +234,15 @@ async function update(req, res) {
     data.ownerDepartmentId  = ownerType === 'Department'  ? ownerDepartmentId  : null;
     data.ownerUnitId        = ownerType === 'Unit'        ? ownerUnitId        : null;
   }
+
+  if (indicatorType    !== undefined) data.indicatorType    = indicatorType;
+  if (progressDirection !== undefined) data.progressDirection = progressDirection;
+  if (indicatorStatus   !== undefined) data.indicatorStatus   = indicatorStatus;
+  if (description       !== undefined) data.description       = description;
+  if (collectionMethod  !== undefined) data.collectionMethod  = collectionMethod;
+  if (verificationSource !== undefined) data.verificationSource = verificationSource;
+  if (minValue !== undefined) data.minValue = minValue != null ? Number(minValue) : null;
+  if (maxValue !== undefined) data.maxValue = maxValue != null ? Number(maxValue) : null;
 
   const indicator = await prisma.indicator.update({
     where: { id: req.params.id },
@@ -263,4 +287,14 @@ async function getAllTargets(req, res) {
   res.json(targets);
 }
 
-module.exports = { list, getOne, getTargets, getAllTargets, getActuals, create, update, setTargets };
+async function getStats(req, res) {
+  const [byType, byStatus, byDirection, total] = await Promise.all([
+    prisma.indicator.groupBy({ by: ['indicatorType'], _count: { id: true }, where: { isActive: true } }),
+    prisma.indicator.groupBy({ by: ['indicatorStatus'], _count: { id: true }, where: { isActive: true } }),
+    prisma.indicator.groupBy({ by: ['progressDirection'], _count: { id: true }, where: { isActive: true } }),
+    prisma.indicator.count({ where: { isActive: true } }),
+  ]);
+  res.json({ total, byType, byStatus, byDirection });
+}
+
+module.exports = { list, getOne, getTargets, getAllTargets, getActuals, create, update, setTargets, getStats };

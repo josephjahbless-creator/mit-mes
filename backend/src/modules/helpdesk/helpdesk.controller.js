@@ -1,5 +1,43 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { createNotification, notifyRole } = require('../../utils/notifications');
+
+// ── SLA targets (hours) per priority ─────────────────────────────────────────
+const SLA_HOURS = { critical: 4, high: 8, medium: 24, low: 72 };
+
+/**
+ * Compute SLA status for a ticket.
+ * Returns { deadlineAt, hoursRemaining, isBreached, slaLabel }
+ */
+function computeSla(ticket) {
+  const hours   = SLA_HOURS[ticket.priority] || SLA_HOURS.medium;
+  const created = new Date(ticket.createdAt);
+  const deadlineAt = new Date(created.getTime() + hours * 60 * 60 * 1000);
+  const now     = new Date();
+
+  // If the ticket is resolved/closed use resolvedAt or closedAt as "now"
+  const endTime = ticket.resolvedAt || ticket.closedAt || now;
+  const msRemaining = deadlineAt.getTime() - endTime.getTime();
+  const hoursRemaining = Math.round(msRemaining / 36e5 * 10) / 10;
+  const isBreached  = msRemaining < 0;
+
+  let slaLabel;
+  if (ticket.status === 'resolved' || ticket.status === 'closed') {
+    slaLabel = isBreached ? 'Resolved — SLA breached' : 'Resolved — within SLA';
+  } else {
+    slaLabel = isBreached
+      ? `Breached by ${Math.abs(hoursRemaining)}h`
+      : `${hoursRemaining}h remaining`;
+  }
+
+  return {
+    slaTargetHours: hours,
+    deadlineAt,
+    hoursRemaining,
+    isBreached,
+    slaLabel,
+  };
+}
 
 // ── Generate ticket number ────────────────────────────────────────────────────
 async function nextTicketNo() {
@@ -40,15 +78,20 @@ exports.listTickets = async (req, res) => {
     prisma.supportTicket.count({ where }),
   ]);
 
-  res.json({ tickets, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+  const ticketsWithSla = tickets.map(t => ({ ...t, sla: computeSla(t) }));
+  res.json({ tickets: ticketsWithSla, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
 };
 
 // ── Ticket stats (admin) ──────────────────────────────────────────────────────
 exports.ticketStats = async (req, res) => {
-  const [total, byStatus, byPriority] = await Promise.all([
+  const [total, byStatus, byPriority, openTickets] = await Promise.all([
     prisma.supportTicket.count(),
     prisma.supportTicket.groupBy({ by: ['status'],   _count: { id: true } }),
     prisma.supportTicket.groupBy({ by: ['priority'], _count: { id: true } }),
+    prisma.supportTicket.findMany({
+      where: { status: { in: ['open', 'in_progress'] } },
+      select: { id: true, priority: true, createdAt: true, resolvedAt: true, closedAt: true, status: true },
+    }),
   ]);
 
   const statusMap = {};
@@ -56,7 +99,14 @@ exports.ticketStats = async (req, res) => {
   const priorityMap = {};
   byPriority.forEach(p => { priorityMap[p.priority] = p._count.id; });
 
-  res.json({ total, byStatus: statusMap, byPriority: priorityMap });
+  // SLA summary
+  const slaBreached  = openTickets.filter(t => computeSla(t).isBreached).length;
+  const slaAtRisk    = openTickets.filter(t => {
+    const { hoursRemaining, isBreached } = computeSla(t);
+    return !isBreached && hoursRemaining < 2;
+  }).length;
+
+  res.json({ total, byStatus: statusMap, byPriority: priorityMap, sla: { breached: slaBreached, atRisk: slaAtRisk, openCount: openTickets.length } });
 };
 
 // ── Get single ticket ─────────────────────────────────────────────────────────
@@ -80,7 +130,7 @@ exports.getTicket = async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
-  res.json(ticket);
+  res.json({ ...ticket, sla: computeSla(ticket) });
 };
 
 // ── Create ticket (public or authenticated) ───────────────────────────────────
@@ -111,6 +161,17 @@ exports.createTicket = async (req, res) => {
       submittedBy: { select: { id: true, name: true, email: true } },
     },
   });
+
+  // Notify admins/me_officers of new ticket
+  notifyRole({
+    roles: ['super_admin', 'admin', 'me_officer'],
+    type: 'helpdesk_new_ticket',
+    title: `New support ticket: ${subject}`,
+    message: `Ticket ${ticketNo} submitted — ${priority || 'medium'} priority.`,
+    relatedType: 'SupportTicket',
+    relatedId: ticket.id,
+  }).catch(() => {});
+
   res.status(201).json(ticket);
 };
 
@@ -216,6 +277,21 @@ exports.addReply = async (req, res) => {
       ? prisma.supportTicket.update({ where: { id: req.params.id }, data: { status: 'in_progress' } })
       : null,
   ]);
+
+  // Notify ticket submitter (if logged-in user) of the new reply
+  if (ticket.submittedById && ticket.submittedById !== user.id) {
+    const isInternalReply = isAdmin && isInternal;
+    if (!isInternalReply) {
+      createNotification({
+        userId: ticket.submittedById,
+        type: 'helpdesk_reply',
+        title: 'New reply on your support ticket',
+        message: `Your ticket "${ticket.subject}" received a new reply from ${user.name}.`,
+        relatedType: 'SupportTicket',
+        relatedId: ticket.id,
+      }).catch(() => {});
+    }
+  }
 
   res.status(201).json(reply);
 };

@@ -14,6 +14,7 @@ import {
 import { dashboardApi, projectsApi } from '../../api';
 import StatCard from '../../components/ui/StatCard';
 import ProgressBar from '../../components/ui/ProgressBar';
+import InsightPanel from '../../components/InsightPanel';
 import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 
 const FISCAL_YEAR = getCurrentFiscalYear();
@@ -359,6 +360,15 @@ export default function DashboardPage() {
 
       {/* ── Flag Header ──────────────────────────────────────────────── */}
       <FlagHeader />
+
+      {/* ── Automated Insight Panel ──────────────────────────────────── */}
+      <InsightPanel
+        title="What the data is telling you"
+        scope="national"
+        fiscalYear={FISCAL_YEAR}
+        compact
+        limit={10}
+      />
 
       {/* ── Industry Statistics ───────────────────────────────────────── */}
       <div>
@@ -785,7 +795,7 @@ export default function DashboardPage() {
           <p className="text-gray-400 text-sm text-center py-4">No {perfPeriod} actuals available.</p>
         )}
 
-        {/* Chart — shown when any chip clicked */}
+        {/* Chart: shown when any chip clicked */}
         {opens.perf && perfChartData.length > 0 && (
           <div className="mt-2 border-t border-blue-100 pt-4">
             <ResponsiveContainer width="100%" height={300}>

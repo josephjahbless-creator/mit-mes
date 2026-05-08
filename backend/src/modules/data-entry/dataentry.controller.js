@@ -2,17 +2,22 @@ const prisma = require('../../config/db');
 const { calculate } = require('../../utils/formulaEngine');
 const { getCurrentFiscalYear } = require('../../utils/fiscalYear');
 const { sendSubmissionNotification, sendApprovalNotification } = require('../../utils/mailer');
+const { emitToRole, emitToUser, emitGlobal } = require('../../lib/socket');
+const { generateSubmissionInsights } = require('../../services/insight.service');
 
 async function listActuals(req, res) {
-  const { indicatorId, institutionId, departmentId, unitId, period, fiscalYear, status } = req.query;
+  const {
+    indicatorId, institutionId, departmentId, unitId, period, fiscalYear, status,
+    page = '1', limit = '50',
+  } = req.query;
   const where = {};
 
-  if (indicatorId)   where.indicatorId   = indicatorId;
+  if (indicatorId)   where.indicatorId    = indicatorId;
   if (period)        where.reportingPeriod = period;
-  if (fiscalYear)    where.fiscalYear    = fiscalYear;
-  if (status)        where.status        = status;
-  if (departmentId)  where.departmentId  = departmentId;
-  if (unitId)        where.unitId        = unitId;
+  if (fiscalYear)    where.fiscalYear     = fiscalYear;
+  if (status)        where.status         = status;
+  if (departmentId)  where.departmentId   = departmentId;
+  if (unitId)        where.unitId         = unitId;
 
   // super_admin / me_officer / admin  → can see all entities (apply optional filter from query)
   // data_collector / viewer           → scoped to own institution only
@@ -23,21 +28,33 @@ async function listActuals(req, res) {
     where.institutionId = institutionId;
   }
 
-  const actuals = await prisma.indicatorActual.findMany({
-    where,
-    include: {
-      indicator:   { select: { id: true, name: true, code: true, unit: true, formulaType: true, formulaConfig: true } },
-      activity:    { select: { id: true, name: true, responsibleInstitutionId: true, responsibleDepartmentId: true, responsibleUnitId: true } },
-      institution: { select: { id: true, name: true, code: true } },
-      department:  { select: { id: true, name: true, code: true } },
-      unit:        { select: { id: true, name: true, code: true } },
-      submittedBy: { select: { id: true, name: true } },
-      supervisedBy: { select: { id: true, name: true } },
-      approvedBy:  { select: { id: true, name: true } },
-    },
-    orderBy: [{ fiscalYear: 'desc' }, { reportingPeriod: 'asc' }],
+  const take = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
+  const skip = (Math.max(parseInt(page) || 1, 1) - 1) * take;
+
+  const [actuals, total] = await Promise.all([
+    prisma.indicatorActual.findMany({
+      where,
+      include: {
+        indicator:    { select: { id: true, name: true, code: true, unit: true, formulaType: true, formulaConfig: true } },
+        activity:     { select: { id: true, name: true, responsibleInstitutionId: true, responsibleDepartmentId: true, responsibleUnitId: true } },
+        institution:  { select: { id: true, name: true, code: true } },
+        department:   { select: { id: true, name: true, code: true } },
+        unit:         { select: { id: true, name: true, code: true } },
+        submittedBy:  { select: { id: true, name: true } },
+        supervisedBy: { select: { id: true, name: true } },
+        approvedBy:   { select: { id: true, name: true } },
+      },
+      orderBy: [{ fiscalYear: 'desc' }, { reportingPeriod: 'asc' }],
+      take,
+      skip,
+    }),
+    prisma.indicatorActual.count({ where }),
+  ]);
+
+  res.json({
+    data:       actuals,
+    pagination: { page: parseInt(page) || 1, limit: take, total, totalPages: Math.ceil(total / take) },
   });
-  res.json(actuals);
 }
 
 async function getActual(req, res) {
@@ -124,6 +141,22 @@ async function submitActual(req, res) {
     return res.status(404).json({ error: 'Indicator not found' });
   }
 
+  // ── Period lock check ─────────────────────────────────────────────────────────
+  // super_admin and me_officer can submit to locked periods (e.g. corrections);
+  // data_collector, admin, and viewer are blocked.
+  const canBypassLock = ['super_admin', 'me_officer'].includes(req.user.role);
+  if (!canBypassLock) {
+    const lock = await prisma.reportingPeriodLock.findUnique({
+      where: { fiscalYear_period: { fiscalYear, period: reportingPeriod } },
+      select: { isLocked: true },
+    });
+    if (lock?.isLocked) {
+      return res.status(423).json({
+        error: `The ${reportingPeriod} ${fiscalYear} reporting period is locked. Contact your M&E officer to submit a correction.`,
+      });
+    }
+  }
+
   // ── Resolve responsible assignment: OBJECTIVE is the primary source of truth ─
   // Priority chain: objective assignment > body fields > user's own institution
   let resolvedInstitutionId = institutionId || null;
@@ -203,6 +236,24 @@ async function submitActual(req, res) {
     if (periodTarget != null && actualValue > periodTarget) {
       return res.status(422).json({
         error: `Submission rejected: progress value (${actualValue}) exceeds the defined target (${periodTarget}). Please enter a value within the target.`,
+      });
+    }
+  }
+
+  // ── Validate min/max range if indicator has defined bounds ────────────────
+  const indicatorFull = await prisma.indicator.findUnique({
+    where: { id: indicatorId },
+    select: { minValue: true, maxValue: true, progressDirection: true, name: true },
+  });
+  if (indicatorFull) {
+    if (indicatorFull.minValue !== null && indicatorFull.minValue !== undefined && Number(actualValue) < indicatorFull.minValue) {
+      return res.status(422).json({
+        error: `Value ${actualValue} is below the minimum allowed value (${indicatorFull.minValue}) for this indicator.`,
+      });
+    }
+    if (indicatorFull.maxValue !== null && indicatorFull.maxValue !== undefined && Number(actualValue) > indicatorFull.maxValue) {
+      return res.status(422).json({
+        error: `Value ${actualValue} exceeds the maximum allowed value (${indicatorFull.maxValue}) for this indicator.`,
       });
     }
   }
@@ -295,6 +346,25 @@ async function updateActual(req, res) {
   if (!actual) return res.status(404).json({ error: 'Not found' });
   if (actual.status === 'approved') return res.status(400).json({ error: 'Cannot edit approved submission' });
 
+  // Ownership: data_collector and admin can only edit their own institution's submissions
+  const canEditAny = ['super_admin', 'me_officer'].includes(req.user.role);
+  if (!canEditAny && actual.institutionId !== req.user.institutionId) {
+    return res.status(403).json({ error: 'You can only edit your own institution\'s submissions' });
+  }
+
+  // Period lock: same bypass rule as submitActual
+  if (!canEditAny) {
+    const lock = await prisma.reportingPeriodLock.findUnique({
+      where: { fiscalYear_period: { fiscalYear: actual.fiscalYear, period: actual.reportingPeriod } },
+      select: { isLocked: true },
+    });
+    if (lock?.isLocked) {
+      return res.status(423).json({
+        error: `The ${actual.reportingPeriod} ${actual.fiscalYear} reporting period is locked and cannot be edited.`,
+      });
+    }
+  }
+
   const updated = await prisma.indicatorActual.update({
     where: { id: req.params.id },
     data: {
@@ -326,6 +396,7 @@ async function supervisorReview(req, res) {
     });
   }
 
+  const { rejectionReason } = req.body;
   const newStatus = action === 'approve' ? 'pending_me' : 'rejected';
 
   const updated = await prisma.indicatorActual.update({
@@ -335,6 +406,7 @@ async function supervisorReview(req, res) {
       supervisedById: req.user.id,
       supervisedAt: new Date(),
       supervisorNote: supervisorNote || null,
+      ...(action === 'reject' && { supervisorReason: rejectionReason || null }),
     },
     include: {
       indicator:    { select: { id: true, name: true, code: true } },
@@ -344,6 +416,26 @@ async function supervisorReview(req, res) {
     },
   });
 
+  // ── Notify submitter of supervisor's decision (fire-and-forget) ─────────────
+  if (updated.submittedBy?.id) {
+    prisma.user.findUnique({
+      where: { id: updated.submittedBy.id },
+      select: { email: true, name: true },
+    }).then(submitter => {
+      if (submitter) {
+        sendApprovalNotification(submitter.email, submitter.name, {
+          indicatorName: updated.indicator?.name || '—',
+          period:        updated.reportingPeriod,
+          fiscalYear:    updated.fiscalYear,
+          status:        newStatus === 'pending_me' ? 'supervisor_approved' : 'rejected',
+          remarks:       action === 'reject'
+            ? (rejectionReason || supervisorNote || 'Returned by supervisor for correction.')
+            : (supervisorNote || null),
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
   res.json(updated);
 }
 
@@ -351,7 +443,7 @@ async function supervisorReview(req, res) {
 // Transitions: pending_me → approved | rejected
 // Roles: me_officer, super_admin
 async function meReview(req, res) {
-  const { action, remarks } = req.body;
+  const { action, remarks, rejectionReason } = req.body;
 
   if (!['approve', 'reject'].includes(action)) {
     return res.status(400).json({ error: 'action must be "approve" or "reject"' });
@@ -376,6 +468,7 @@ async function meReview(req, res) {
       approvedById: req.user.id,
       approvedAt: new Date(),
       remarks: remarks || null,
+      ...(action === 'reject' && { rejectionReason: rejectionReason || null }),
     },
     include: {
       indicator:   { select: { id: true, name: true, code: true } },
@@ -403,6 +496,9 @@ async function meReview(req, res) {
 
   // ── Return live performance snapshot after approval ───────────────────────
   if (newStatus === 'approved') {
+    // Fire-and-forget: generate narrative insights for this approved submission
+    generateSubmissionInsights(updated.id).catch(() => {});
+
     const periodTargetKey = { Q1: 'q1Target', Q2: 'q2Target', Q3: 'q3Target', Q4: 'q4Target', Annual: 'annualTarget' };
     const tgt = await prisma.indicatorTarget.findFirst({
       where: {
@@ -456,6 +552,14 @@ async function approveActual(req, res) {
     ? Math.round((updated.actualValue / perfTarget) * 1000) / 10
     : null;
 
+  // Generate narrative insights (fire-and-forget)
+  generateSubmissionInsights(updated.id).catch(() => {});
+
+  // Real-time broadcast to M&E officers
+  emitToRole('me_officer', 'submission:approved', { actualId: updated.id, indicatorId: updated.indicatorId, achievementPct });
+  emitToRole('admin',      'submission:approved', { actualId: updated.id });
+  emitGlobal('dashboard:refresh', { type: 'approval' });
+
   res.json({
     ...updated,
     _performance: {
@@ -472,13 +576,18 @@ async function approveActual(req, res) {
 
 async function rejectActual(req, res) {
   const { remarks } = req.body;
-  const actual = await prisma.indicatorActual.findUnique({ where: { id: req.params.id } });
+  const actual = await prisma.indicatorActual.findUnique({ where: { id: req.params.id }, select: { id: true, submittedById: true } });
   if (!actual) return res.status(404).json({ error: 'Not found' });
 
   const updated = await prisma.indicatorActual.update({
     where: { id: req.params.id },
     data: { status: 'rejected', remarks, approvedById: req.user.id, approvedAt: new Date() },
   });
+
+  // Notify the submitter in real-time
+  if (actual.submittedById) emitToUser(actual.submittedById, 'submission:rejected', { actualId: updated.id, remarks });
+  emitGlobal('dashboard:refresh', { type: 'rejection' });
+
   res.json(updated);
 }
 
@@ -669,6 +778,73 @@ async function listDepartments(req, res) {
   res.json(departments);
 }
 
+// ── Completeness & Timeliness Monitoring ─────────────────────────────────────
+async function completenessReport(req, res) {
+  const { fiscalYear, period } = req.query;
+  const fy = fiscalYear || getCurrentFiscalYear();
+
+  const institutions = await prisma.institution.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, code: true },
+    orderBy: { code: 'asc' },
+  });
+
+  const activeIndicators = await prisma.indicator.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, code: true, ownerInstitutionId: true, reportingFrequency: true },
+  });
+
+  const periods = period ? [period] : ['Q1', 'Q2', 'Q3', 'Q4'];
+  const report  = [];
+
+  for (const inst of institutions) {
+    // Indicators expected from this institution (owner or global)
+    const instIndicators = activeIndicators.filter(ind =>
+      !ind.ownerInstitutionId || ind.ownerInstitutionId === inst.id
+    );
+
+    // Only count quarterly periods for quarterly indicators, skip annual-only
+    const expectedCount = instIndicators.reduce((sum, ind) => {
+      if (ind.reportingFrequency === 'annual') return sum + (periods.includes('Annual') ? 1 : 0);
+      return sum + periods.filter(p => p !== 'Annual').length;
+    }, 0);
+
+    if (expectedCount === 0) continue;
+
+    const [submitted, approved] = await Promise.all([
+      prisma.indicatorActual.count({
+        where: {
+          institutionId: inst.id,
+          fiscalYear:    fy,
+          reportingPeriod: { in: periods },
+          status: { in: ['submitted', 'pending_supervisor', 'pending_me', 'approved'] },
+        },
+      }),
+      prisma.indicatorActual.count({
+        where: {
+          institutionId: inst.id,
+          fiscalYear:    fy,
+          reportingPeriod: { in: periods },
+          status: 'approved',
+        },
+      }),
+    ]);
+
+    report.push({
+      institution: { id: inst.id, name: inst.name, code: inst.code },
+      totalExpected:    expectedCount,
+      submitted,
+      approved,
+      missing:          Math.max(0, expectedCount - submitted),
+      completenessRate: expectedCount > 0 ? Math.round((submitted / expectedCount) * 100) : 0,
+      approvalRate:     submitted > 0 ? Math.round((approved / submitted) * 100) : 0,
+    });
+  }
+
+  report.sort((a, b) => b.completenessRate - a.completenessRate);
+  res.json({ fiscalYear: fy, periods, report });
+}
+
 module.exports = {
   listActuals, getActual, getCalculated,
   submitActual, updateActual,
@@ -676,4 +852,5 @@ module.exports = {
   approveActual, rejectActual,
   getComments, addComment,
   submissionTracking, listDepartments,
+  completenessReport,
 };

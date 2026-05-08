@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { BellIcon, CheckIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { notificationsApi } from '../api';
+import { useSocketEvent } from '../hooks/useSocket';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,21 @@ export default function NotificationBell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // Unread count — polls every 60 s
+  // Real-time: invalidate count when server pushes a notification event
+  useSocketEvent('notification:new', () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+    queryClient.invalidateQueries({ queryKey: ['notifications', 'list'] });
+  });
+  useSocketEvent('submission:approved', () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    toast.success('A submission was just approved', { icon: '✅' });
+  });
+  useSocketEvent('submission:rejected', () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    toast.error('A submission was rejected');
+  });
+
+  // Unread count: polls every 60 s (socket supplements between polls)
   const { data: countData } = useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: () => notificationsApi.unreadCount().then((r) => r.data),

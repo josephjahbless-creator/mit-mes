@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { dataEntryApi, institutionsApi } from '../../api';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -9,6 +9,8 @@ import {
   BuildingOfficeIcon, ChartBarIcon, ChevronDownIcon,
   PaperClipIcon, LockClosedIcon, MagnifyingGlassIcon,
   EyeIcon, XMarkIcon, ShieldCheckIcon,
+  ArrowUpTrayIcon, ArrowDownTrayIcon, DocumentArrowUpIcon,
+  SparklesIcon, ExclamationCircleIcon,
 } from '@heroicons/react/24/outline';
 import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 
@@ -253,15 +255,17 @@ function ReviewTab() {
     queryFn:  () => institutionsApi.list().then(r => r.data),
   });
 
-  const { data: actuals = [], isLoading } = useQuery({
+  const { data: actualsResp = {}, isLoading } = useQuery({
     queryKey: ['actuals-review', filterStatus, filterPeriod, filterInst],
     queryFn: () => dataEntryApi.listActuals({
-      fiscalYear:   FISCAL_YEAR,
-      status:       filterStatus  || undefined,
-      period:       filterPeriod  || undefined,
-      institutionId: filterInst   || undefined,
+      fiscalYear:    FISCAL_YEAR,
+      status:        filterStatus   || undefined,
+      period:        filterPeriod   || undefined,
+      institutionId: filterInst     || undefined,
+      limit:         200,
     }).then(r => r.data),
   });
+  const actuals = actualsResp.data ?? actualsResp ?? [];
 
   const approveMutation = useMutation({
     mutationFn: (id) => dataEntryApi.approve(id),
@@ -349,8 +353,8 @@ function ReviewTab() {
         </select>
         <select className="input max-w-[200px]" value={filterInst} onChange={e => setFilterInst(e.target.value)}>
           <option value="">All Institutions</option>
-          {institutions.filter(i => i.code !== 'MIT').map(i => (
-            <option key={i.id} value={i.id}>{i.code} — {i.name}</option>
+          {institutions.filter(i => !['MIT', 'MIT-HQ'].includes(i.code)).map(i => (
+            <option key={i.id} value={i.id}>{i.code}: {i.name}</option>
           ))}
         </select>
         <button
@@ -494,7 +498,7 @@ function ReviewTab() {
                           </button>
                         )}
 
-                        {/* Approved — view-only badge */}
+                        {/* Approved: view-only badge */}
                         {a.status === 'approved' && (
                           <span className="text-[10px] text-green-600 font-semibold flex items-center gap-1">
                             <CheckCircleIcon className="w-3.5 h-3.5" /> Verified
@@ -541,13 +545,15 @@ function SubmissionsTab() {
   const user = useAuthStore(s => s.user);
   const qc   = useQueryClient();
 
-  const { data: actuals = [], isLoading } = useQuery({
+  const { data: actualsAllResp = {}, isLoading } = useQuery({
     queryKey: ['actuals', 'all', selectedStatus],
     queryFn: () => dataEntryApi.listActuals({
       fiscalYear: FISCAL_YEAR,
-      status: selectedStatus || undefined,
+      status:     selectedStatus || undefined,
+      limit:      200,
     }).then(r => r.data),
   });
+  const actuals = actualsAllResp.data ?? actualsAllResp ?? [];
 
   const approveMutation = useMutation({
     mutationFn: (id) => dataEntryApi.approve(id),
@@ -843,6 +849,357 @@ function TrackingTab() {
   );
 }
 
+// ── Bulk Import Tab ────────────────────────────────────────────────────────────
+function BulkImportTab() {
+  const [file,       setFile]       = useState(null);
+  const [step,       setStep]       = useState('upload'); // 'upload' | 'preview' | 'result'
+  const [previewing, setPreviewing] = useState(false);
+  const [importing,  setImporting]  = useState(false);
+  const [preview,    setPreview]    = useState(null);
+  const [result,     setResult]     = useState(null);
+  const fileRef = useRef();
+
+  const downloadTemplate = async () => {
+    try {
+      const res = await dataEntryApi.downloadTemplate();
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a   = document.createElement('a');
+      a.href = url; a.download = 'MIT_MES_Import_Template.xlsx';
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); window.URL.revokeObjectURL(url);
+      toast.success('Template downloaded');
+    } catch { toast.error('Download failed'); }
+  };
+
+  const handlePreview = async () => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setPreviewing(true);
+    try {
+      const res = await dataEntryApi.previewImport(fd);
+      setPreview(res.data);
+      setStep('preview');
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Preview failed');
+    } finally { setPreviewing(false); }
+  };
+
+  const handleImport = async () => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setImporting(true);
+    try {
+      const res = await dataEntryApi.bulkImport(fd);
+      setResult(res.data);
+      setStep('result');
+      if (res.data.imported > 0) toast.success(`${res.data.imported} record${res.data.imported !== 1 ? 's' : ''} imported`);
+      if (res.data.skipped  > 0) toast.error(`${res.data.skipped} row${res.data.skipped !== 1 ? 's' : ''} skipped`);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Import failed');
+    } finally { setImporting(false); }
+  };
+
+  const reset = () => { setFile(null); setStep('upload'); setPreview(null); setResult(null); };
+
+  // ── Result ──────────────────────────────────────────────────────────────────
+  if (step === 'result' && result) {
+    const hasErrors = result.errors?.length > 0;
+    return (
+      <div className="space-y-4 max-w-2xl">
+        <div className={`rounded-xl border p-5 ${hasErrors ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
+          <div className="flex items-start gap-3 mb-3">
+            {hasErrors
+              ? <ExclamationCircleIcon className="w-7 h-7 text-amber-500 shrink-0" />
+              : <CheckCircleIcon       className="w-7 h-7 text-green-500 shrink-0" />}
+            <div>
+              <p className="font-bold text-gray-900">{result.message}</p>
+              <div className="flex gap-4 mt-1 text-sm">
+                <span className="text-green-700 font-semibold">{result.imported} imported</span>
+                {result.skipped > 0 && <span className="text-amber-700 font-semibold">{result.skipped} skipped</span>}
+              </div>
+            </div>
+          </div>
+          {hasErrors && (
+            <div>
+              <p className="text-sm font-semibold text-amber-800 mb-2">Skipped rows ({result.errors.length}):</p>
+              <div className="max-h-52 overflow-y-auto rounded-lg border border-amber-200 bg-white p-2 space-y-1">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="flex gap-3 text-xs py-1 border-b border-gray-50 last:border-0">
+                    <span className="font-mono text-amber-600 w-14 shrink-0">Row {e.row}</span>
+                    <span className="text-gray-600">{e.error}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <button onClick={reset} className="btn-secondary">Import Another File</button>
+      </div>
+    );
+  }
+
+  // ── Preview ─────────────────────────────────────────────────────────────────
+  if (step === 'preview' && preview) {
+    const readyRows = preview.rows.filter(r => r.status === 'ready');
+    const errorRows = preview.rows.filter(r => r.status === 'error');
+    const trunc = (str, n) => str && str.length > n ? str.slice(0, n) + '…' : (str || '');
+    return (
+      <div className="space-y-4">
+        {/* Summary banner */}
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <div>
+            <h3 className="font-bold text-gray-900">Import Preview</h3>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {preview.total} rows analysed from <span className="font-medium text-gray-700">{file?.name}</span>
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold ${
+              readyRows.length > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+            }`}>
+              <CheckCircleIcon className="w-4 h-4" /> {readyRows.length} ready
+            </span>
+            {errorRows.length > 0 && (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-100 text-red-700">
+                <ExclamationCircleIcon className="w-4 h-4" /> {errorRows.length} errors
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Rows table */}
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto" style={{ maxHeight: '460px', overflowY: 'auto' }}>
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 border-b border-gray-200" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                <tr>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 w-10">#</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Indicator</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Results Framework Chain</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Responsible Owner</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Institution</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Period / FY</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-600">Value</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {preview.rows.map(row => (
+                  <tr key={row.rowNum} className={row.status === 'error' ? 'bg-red-50/60' : 'hover:bg-gray-50 transition-colors'}>
+                    {/* Row # */}
+                    <td className="px-3 py-2.5 text-gray-400 font-mono">{row.rowNum}</td>
+
+                    {/* Indicator */}
+                    <td className="px-3 py-2.5 max-w-[180px]">
+                      {row.indicator ? (
+                        <div>
+                          <p className="font-semibold text-gray-900 leading-snug">{trunc(row.indicator.name, 50)}</p>
+                          <p className="text-[10px] text-gray-400 font-mono mt-0.5">{row.indicator.code}</p>
+                          {row.indicator.unit && (
+                            <p className="text-[10px] text-blue-500 mt-0.5">Unit: {row.indicator.unit}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-mono text-red-500">{row.indicatorCode || <em className="text-gray-400">Missing</em>}</span>
+                      )}
+                    </td>
+
+                    {/* RF Chain */}
+                    <td className="px-3 py-2.5 max-w-[220px]">
+                      {row.chain ? (
+                        <div className="space-y-0.5">
+                          {row.chain.objective && (
+                            <p className="text-[10px]">
+                              <span className="text-gray-400">Obj: </span>
+                              <span className="text-purple-700 font-medium">{trunc(row.chain.objective, 45)}</span>
+                            </p>
+                          )}
+                          {row.chain.outcome && (
+                            <p className="text-[10px]">
+                              <span className="text-gray-400">Outcome: </span>
+                              <span className="text-blue-700">{trunc(row.chain.outcome, 45)}</span>
+                            </p>
+                          )}
+                          {row.chain.output && (
+                            <p className="text-[10px]">
+                              <span className="text-gray-400">Output: </span>
+                              <span className="text-teal-700">{trunc(row.chain.output, 45)}</span>
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+
+                    {/* Responsible owner */}
+                    <td className="px-3 py-2.5">
+                      {row.owner ? (
+                        <div>
+                          <p className="font-medium text-gray-700 text-[11px]">{row.owner.code || row.owner.name}</p>
+                          <p className="text-[10px] text-gray-400">{row.owner.type}</p>
+                        </div>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+
+                    {/* Reporting institution */}
+                    <td className="px-3 py-2.5">
+                      {row.institution ? (
+                        <span className="font-mono text-gray-700 text-[11px]">{row.institution.code}</span>
+                      ) : (
+                        <span className="text-gray-400 font-mono text-[10px]">{row.institutionCode || '—'}</span>
+                      )}
+                    </td>
+
+                    {/* Period / FY */}
+                    <td className="px-3 py-2.5">
+                      <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-700">{row.period || '—'}</span>
+                      {row.fiscalYear && <p className="text-[10px] text-gray-400 mt-0.5">{row.fiscalYear}</p>}
+                    </td>
+
+                    {/* Value */}
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="font-bold text-gray-900">{row.value?.toLocaleString() ?? '—'}</span>
+                      {row.indicator?.unit && <span className="text-gray-400 ml-1">{row.indicator.unit}</span>}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-3 py-2.5">
+                      {row.status === 'ready' ? (
+                        <span className="flex items-center gap-1 text-green-700 font-semibold">
+                          <CheckCircleIcon className="w-3.5 h-3.5" /> Ready
+                        </span>
+                      ) : (
+                        <div>
+                          <span className="flex items-center gap-1 text-red-700 font-semibold">
+                            <ExclamationCircleIcon className="w-3.5 h-3.5" /> Error
+                          </span>
+                          <ul className="mt-1 space-y-0.5">
+                            {row.errors.map((e, i) => (
+                              <li key={i} className="text-[10px] text-red-500 leading-snug">{e}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {readyRows.length > 0 && (
+            <button
+              onClick={handleImport}
+              disabled={importing}
+              className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+            >
+              <ArrowUpTrayIcon className="w-4 h-4" />
+              {importing ? 'Importing…' : `Import ${readyRows.length} Ready Row${readyRows.length !== 1 ? 's' : ''}`}
+            </button>
+          )}
+          <button onClick={reset} className="btn-secondary">Change File</button>
+          {errorRows.length > 0 && readyRows.length === 0 && (
+            <p className="text-sm text-red-600 font-medium ml-2">All rows have errors — fix your file and re-upload.</p>
+          )}
+          {errorRows.length > 0 && readyRows.length > 0 && (
+            <p className="text-xs text-amber-600 ml-2">{errorRows.length} error row{errorRows.length !== 1 ? 's' : ''} will be skipped automatically.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Upload (step 1) ──────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-5 max-w-3xl">
+      {/* Instructions */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+        <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+          <SparklesIcon className="w-4 h-4" /> Smart Bulk Import
+        </h3>
+        <ol className="list-decimal list-inside space-y-1.5 text-sm text-blue-700">
+          <li>Download the Excel template and fill in your activity data</li>
+          <li>Required columns:
+            {['indicatorCode', 'institutionCode', 'fiscalYear', 'period', 'value'].map(c => (
+              <code key={c} className="bg-blue-100 rounded px-1 mx-0.5 text-xs">{c}</code>
+            ))}
+          </li>
+          <li>Valid periods: <strong>Q1, Q2, Q3, Q4, Annual</strong> · Fiscal year format: <strong>2025-2026</strong></li>
+          <li>Click <strong>Analyse File</strong> — the system maps each row to its Results Framework chain before you commit</li>
+        </ol>
+        <button
+          onClick={downloadTemplate}
+          className="mt-3 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          <ArrowDownTrayIcon className="w-4 h-4" /> Download Excel Template
+        </button>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all select-none ${
+          file
+            ? 'border-green-400 bg-green-50'
+            : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/40'
+        }`}
+        onClick={() => fileRef.current?.click()}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => {
+          e.preventDefault();
+          const f = e.dataTransfer.files[0];
+          if (f) setFile(f);
+        }}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="hidden"
+          onChange={e => { setFile(e.target.files[0]); e.target.value = ''; }}
+        />
+        {file ? (
+          <div className="flex items-center justify-center gap-4">
+            <CheckCircleIcon className="w-9 h-9 text-green-500 shrink-0" />
+            <div className="text-left">
+              <p className="font-semibold text-green-700">{file.name}</p>
+              <p className="text-xs text-green-500 mt-0.5">{(file.size / 1024).toFixed(1)} KB · Ready to analyse</p>
+            </div>
+            <button
+              onClick={e => { e.stopPropagation(); setFile(null); }}
+              className="ml-4 text-xs text-red-500 hover:text-red-700 underline"
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <>
+            <DocumentArrowUpIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="font-medium text-gray-600">Drop your Excel or CSV file here, or click to browse</p>
+            <p className="text-xs text-gray-400 mt-1">Supported: .xlsx · .xls · .csv · Max 500 rows · 5 MB</p>
+          </>
+        )}
+      </div>
+
+      {file && (
+        <button
+          onClick={handlePreview}
+          disabled={previewing}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 text-sm transition-colors"
+        >
+          <SparklesIcon className="w-5 h-5" />
+          {previewing ? 'Analysing…' : 'Analyse File'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ══ Main Page ══════════════════════════════════════════════════════════════════
 export default function DataEntryPage() {
   const user   = useAuthStore(s => s.user);
@@ -855,6 +1212,7 @@ export default function DataEntryPage() {
     { key: 'submissions', label: 'My Submissions' },
     ...(isAdmin ? [{ key: 'review', label: 'Review & Approve', badge: true }] : []),
     { key: 'tracking',   label: 'Submission Tracking' },
+    { key: 'import',     label: 'Bulk Import' },
   ];
 
   return (
@@ -890,6 +1248,7 @@ export default function DataEntryPage() {
       {tab === 'submissions' && <SubmissionsTab />}
       {tab === 'review'      && <ReviewTab />}
       {tab === 'tracking'    && <TrackingTab />}
+      {tab === 'import'      && <BulkImportTab />}
     </div>
   );
 }

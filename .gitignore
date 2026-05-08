@@ -47,6 +47,9 @@ desktop.ini
 *.swp
 *.swo
 
+# ── Claude Code (machine-specific paths — not useful to other developers) ─────
+.claude/
+
 # ── Puppeteer / screenshots (dev tools, not source code) ─────────────────────
 manual_screenshots/
 node_modules/

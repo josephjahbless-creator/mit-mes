@@ -12,13 +12,13 @@ import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 const FISCAL_YEAR = getCurrentFiscalYear();
 const PERIODS = ['Q1', 'Q2', 'Q3', 'Q4', 'H1', 'H2', 'Annual'];
 const PERIOD_LABELS = {
-  Q1: 'Q1 - Jul to Sep 2025', Q2: 'Q2 - Oct to Dec 2025',
-  Q3: 'Q3 - Jan to Mar 2026', Q4: 'Q4 - Apr to Jun 2026',
-  H1: 'H1 - Jul to Dec 2025', H2: 'H2 - Jan to Jun 2026',
+  Q1: 'Q1: Jul to Sep 2025', Q2: 'Q2: Oct to Dec 2025',
+  Q3: 'Q3: Jan to Mar 2026', Q4: 'Q4: Apr to Jun 2026',
+  H1: 'H1: Jul to Dec 2025', H2: 'H2: Jan to Jun 2026',
   Annual: 'Annual 2025/2026',
 };
 const SECTORS = [
-  '', 'Manufacturing', 'Agro-Processing', 'Food and Beverages',
+  '', 'Manufacturing', 'Agro Processing', 'Food and Beverages',
   'Textile and Garments', 'Chemical and Pharmaceuticals',
   'Construction Materials', 'Mining and Quarrying',
   'Energy (Solar/Renewable)', 'ICT and Electronics', 'Other Industries',
@@ -301,7 +301,7 @@ export default function IndustryStatsPage() {
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-xs text-blue-700 space-y-1">
         <p className="font-bold">How to enter industry statistics:</p>
         <p>1. Add one <strong>overall record</strong> (no sector) per period for national totals shown on the dashboard.</p>
-        <p>2. Add separate <strong>sector records</strong> (Manufacturing, Agro-Processing, etc.) for the sector breakdown chart.</p>
+        <p>2. Add separate <strong>sector records</strong> (Manufacturing, Agro Processing, etc.) for the sector breakdown chart.</p>
         <p>3. Keep the same period across all records for the same reporting cycle.</p>
       </div>
     </div>

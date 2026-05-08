@@ -77,6 +77,11 @@ async function login(req, res) {
     data: { failedLoginAttempts: 0, lockedUntil: null },
   });
 
+  // ── 2FA challenge — don't issue tokens yet ────────────────────────────────
+  if (user.twoFactorEnabled) {
+    return res.json({ requiresTwoFactor: true, userId: user.id });
+  }
+
   const payload = {
     id: user.id, email: user.email, role: user.role,
     institutionId: user.institutionId,

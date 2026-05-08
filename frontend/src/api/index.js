@@ -7,6 +7,14 @@ export const authApi = {
   changePassword: (data) => api.post('/auth/change-password', data),
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword:  (data) => api.post('/auth/reset-password', data),
+  requestAccount: (data) => api.post('/auth/request-account', data),
+};
+
+export const userRequestsApi = {
+  list:         (params) => api.get('/user-requests', { params }),
+  pendingCount: ()       => api.get('/user-requests/count'),
+  approve:      (id, data) => api.post(`/user-requests/${id}/approve`, data),
+  reject:       (id, data) => api.post(`/user-requests/${id}/reject`, data),
 };
 
 export const institutionsApi = {
@@ -22,6 +30,7 @@ export const usersApi = {
   get: (id) => api.get(`/users/${id}`),
   create: (data) => api.post('/users', data),
   update: (id, data) => api.patch(`/users/${id}`, data),
+  toggleActive: (id) => api.patch(`/users/${id}/toggle-active`),
   resetPassword: (id, data) => api.patch(`/users/${id}/reset-password`, data),
 };
 
@@ -41,6 +50,7 @@ export const frameworkApi = {
 };
 
 export const indicatorsApi = {
+  getStats: () => api.get('/indicators/stats'),
   list: (params) => api.get('/indicators', { params }),
   get: (id) => api.get(`/indicators/${id}`),
   create: (data) => api.post('/indicators', data),
@@ -62,6 +72,10 @@ export const dataEntryApi = {
   tracking: (params) => api.get('/data-entry/tracking', { params }),
   listDepartments: () => api.get('/data-entry/departments'),
   uploadFiles: (formData) => api.post('/uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  previewImport: (formData) => api.post('/data-entry/import/preview', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  bulkImport: (formData) => api.post('/data-entry/import/bulk', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  downloadTemplate: () => api.get('/data-entry/import/template', { responseType: 'blob' }),
+  completeness: (params) => api.get('/data-entry/completeness', { params }),
 };
 
 export const budgetApi = {
@@ -115,7 +129,10 @@ export const reportsApi = {
   // consolidated: returns hierarchical { objectives, summary, performance }
   // params: fiscalYear, period, ownerType, ownerInstitutionId, ownerDepartmentId, ownerUnitId
   consolidated: (params) => api.get('/reports/consolidated', { params }),
-  exportExcel:  (data) => api.post('/reports/export/excel', data, { responseType: 'blob' }),
+  exportExcel:     (data) => api.post('/reports/export/excel',      data, { responseType: 'blob' }),
+  exportPdf:       (data) => api.post('/reports/export/pdf',        data, { responseType: 'text' }),
+  exportPdfServer: (data) => api.post('/reports/export/pdf-server', data, { responseType: 'arraybuffer' }),
+  exportDocx:      (data) => api.post('/reports/export/docx',       data, { responseType: 'blob' }),
 };
 
 export const integrationsApi = {
@@ -165,11 +182,27 @@ export const commentsApi = {
 };
 
 export const analyticsApi = {
-  trends:      (params) => api.get('/analytics/trends', { params }),
-  rankings:    (params) => api.get('/analytics/rankings', { params }),
-  forecasting: (params) => api.get('/analytics/forecasting', { params }),
-  matrix:      (params) => api.get('/analytics/performance-matrix', { params }),
-  summary:     (params) => api.get('/analytics/summary', { params }),
+  trends:          (params) => api.get('/analytics/trends', { params }),
+  rankings:        (params) => api.get('/analytics/rankings', { params }),
+  forecasting:     (params) => api.get('/analytics/forecasting', { params }),
+  matrix:          (params) => api.get('/analytics/performance-matrix', { params }),
+  summary:         (params) => api.get('/analytics/summary', { params }),
+  descriptive:     (params) => api.get('/analytics/descriptive', { params }),
+  variance:        (params) => api.get('/analytics/variance', { params }),
+  disaggregation:  (params) => api.get('/analytics/disaggregation', { params }),
+  costBenefit:     (params) => api.get('/analytics/cost-benefit', { params }),
+  rbmLogframe:     (params) => api.get('/analytics/rbm-logframe', { params }),
+  aiAnomalies:     (params) => api.get('/analytics/ai/anomalies', { params }),
+  aiRiskScores:    (params) => api.get('/analytics/ai/risk-scores', { params }),
+  aiForecasting:   (params) => api.get('/analytics/ai/forecasting', { params }),
+  aiRunAlerts:     (data)   => api.post('/analytics/ai/run-alerts', data),
+};
+
+export const swotApi = {
+  list:   (params) => api.get('/swot', { params }),
+  create: (data)   => api.post('/swot', data),
+  update: (id, data) => api.patch(`/swot/${id}`, data),
+  remove: (id)     => api.delete(`/swot/${id}`),
 };
 
 export const frameworkVersionsApi = {
@@ -199,4 +232,88 @@ export const helpdeskApi = {
   listReplies:   (id)     => api.get(`/helpdesk/tickets/${id}/replies`),
   addReply:      (id, data) => api.post(`/helpdesk/tickets/${id}/replies`, data),
   deleteReply:   (id, rid) => api.delete(`/helpdesk/tickets/${id}/replies/${rid}`),
+};
+
+export const auditApi = {
+  list:  (params) => api.get('/audit-logs', { params }),
+  stats: ()       => api.get('/audit-logs/stats'),
+};
+
+export const tocApi = {
+  get:             (level, referenceId) => api.get(`/toc/${level}/${referenceId}`),
+  upsert:          (data)    => api.post('/toc', data),
+  listAll:         ()        => api.get('/toc'),
+  addAssumption:   (tocId, data) => api.post(`/toc/${tocId}/assumptions`, data),
+  deleteAssumption:(id)      => api.delete(`/toc/assumptions/${id}`),
+  addRisk:         (tocId, data) => api.post(`/toc/${tocId}/risks`, data),
+  deleteRisk:      (id)      => api.delete(`/toc/risks/${id}`),
+};
+
+export const twoFactorApi = {
+  status:    ()     => api.get('/auth/2fa/status'),
+  setup:     ()     => api.post('/auth/2fa/setup'),
+  verify:    (data) => api.post('/auth/2fa/verify', data),
+  disable:   (data) => api.post('/auth/2fa/disable', data),
+  challenge: (data) => api.post('/auth/2fa/challenge', data),
+};
+
+export const externalIntegrationsApi = {
+  list:          ()              => api.get('/external-integrations'),
+  get:           (system)        => api.get(`/external-integrations/${system}`),
+  configure:     (system, data)  => api.put(`/external-integrations/${system}`, data),
+  testConnection:(system)        => api.post(`/external-integrations/${system}/test`),
+  sync:          (system)        => api.post(`/external-integrations/${system}/sync`),
+  getLogs:       (system)        => api.get(`/external-integrations/${system}/logs`),
+  ssoStatus:     ()              => api.get('/auth/sso/status'),
+};
+
+export const mtefApi = {
+  list:    (params) => api.get('/mtef', { params }),
+  summary: ()       => api.get('/mtef/summary'),
+  create:  (data)   => api.post('/mtef', data),
+  update:  (id, d)  => api.patch(`/mtef/${id}`, d),
+  remove:  (id)     => api.delete(`/mtef/${id}`),
+};
+
+export const emailReportsApi = {
+  list:    ()           => api.get('/email-reports'),
+  create:  (data)       => api.post('/email-reports', data),
+  update:  (id, data)   => api.patch(`/email-reports/${id}`, data),
+  remove:  (id)         => api.delete(`/email-reports/${id}`),
+  trigger: (id)         => api.post(`/email-reports/${id}/trigger`),
+};
+
+export const smsApi = {
+  config: ()           => api.get('/sms/config'),
+  logs:   (params)     => api.get('/sms/logs', { params }),
+  send:   (data)       => api.post('/sms/send', data),
+};
+
+export const customFormsApi = {
+  list:         ()           => api.get('/custom-forms'),
+  get:          (id)         => api.get(`/custom-forms/${id}`),
+  create:       (data)       => api.post('/custom-forms', data),
+  update:       (id, data)   => api.patch(`/custom-forms/${id}`, data),
+  remove:       (id)         => api.delete(`/custom-forms/${id}`),
+  submit:       (id, data)   => api.post(`/custom-forms/${id}/submit`, data),
+  getResponses: (id)         => api.get(`/custom-forms/${id}/responses`),
+};
+
+export const iatiApi = {
+  downloadActivities: () => api.get('/iati/activities.xml', { responseType: 'blob' }),
+  downloadResults:    () => api.get('/iati/results.xml',    { responseType: 'blob' }),
+};
+
+export const disaggregationApi = {
+  list:       ()       => api.get('/disaggregation'),
+  getOptions: (id)     => api.get(`/disaggregation/${id}/options`),
+};
+
+export const insightsApi = {
+  list:                (params) => api.get('/insights', { params }),
+  getSubmission:       (actualId) => api.get(`/insights/submission/${actualId}`),
+  getIndicator:        (indicatorId, params) => api.get(`/insights/indicator/${indicatorId}`, { params }),
+  markRead:            (ids) => api.patch('/insights/mark-read', { ids }),
+  dismiss:             (id)  => api.patch(`/insights/${id}/dismiss`),
+  triggerNational:     (data) => api.post('/insights/trigger-national', data),
 };

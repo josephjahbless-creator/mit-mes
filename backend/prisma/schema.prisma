@@ -44,12 +44,39 @@ enum FormulaType {
   complement_pct
   multi_input
   manual
+  yoy_growth
+  weighted_score
+  cost_per_output
+  ppt_change
+  binary
+  rate_per_n
+  average_value
 }
 
 enum OwnerType {
   Institution
   Department
   Unit
+}
+
+enum IndicatorType {
+  output_indicator
+  outcome_indicator
+  impact_indicator
+  process_indicator
+}
+
+enum ProgressDirection {
+  increasing
+  decreasing
+  stable
+}
+
+enum IndicatorStatus {
+  active
+  discontinued
+  under_revision
+  retired
 }
 
 model Institution {
@@ -67,6 +94,7 @@ model Institution {
   indicatorTargets    IndicatorTarget[]
   indicatorActuals    IndicatorActual[]
   budgetPlans         BudgetPlan[]
+  mtefBudgets         MtefBudget[]
   expenditures        Expenditure[]
   formSubmissions     FormSubmission[]
   itemizedBudgets     ItemizedBudget[]
@@ -78,6 +106,9 @@ model Institution {
   apiKeys            ApiKey[]
   syncLogs           ApiSyncLog[]
   documents          Document[]
+  customFormResponses CustomFormResponse[]
+  swotEntries         SwotEntry[]
+  systemInsights      SystemInsight[]
 
   @@map("institutions")
 }
@@ -96,6 +127,14 @@ model User {
   lockedUntil         DateTime?
   passwordResetToken  String?
   passwordResetExpiry DateTime?
+  // 2FA
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean  @default(false)
+  // Contact
+  phoneNumber       String?
+  // SSO
+  ssoProvider       String?
+  ssoId             String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -123,6 +162,12 @@ model User {
   submittedTickets          SupportTicket[]    @relation("TicketSubmittedBy")
   assignedTickets           SupportTicket[]    @relation("TicketAssignedTo")
   ticketReplies             TicketReply[]
+  tocCreated                TheoryOfChange[]
+  customFormsCreated        CustomForm[]
+  customFormResponses       CustomFormResponse[]
+  swotEntries               SwotEntry[]
+  reviewedRequests          UserRequest[]  @relation("RequestReviewedBy")
+  pushSubscriptions         PushSubscription[]
 
   @@map("users")
 }
@@ -212,6 +257,7 @@ model Activity {
   responsibleDepartment  Department?   @relation("ActivityDepartment", fields: [responsibleDepartmentId], references: [id])
   responsibleUnit        Unit?         @relation("ActivityUnit", fields: [responsibleUnitId], references: [id])
   budgetPlans            BudgetPlan[]
+  mtefBudgets            MtefBudget[]
   actuals                IndicatorActual[]
   milestones             ActivityMilestone[]
 
@@ -250,6 +296,14 @@ model Indicator {
   baselineYear        Int?
   createdById         String
   isActive            Boolean            @default(true)
+  indicatorType      IndicatorType?
+  progressDirection  ProgressDirection @default(increasing)
+  indicatorStatus    IndicatorStatus   @default(active)
+  minValue           Float?
+  maxValue           Float?
+  collectionMethod   String?
+  verificationSource String?
+  description        String?
   ownerType           OwnerType?
   ownerInstitutionId  String?
   ownerDepartmentId   String?
@@ -265,7 +319,9 @@ model Indicator {
 
   targets  IndicatorTarget[]
   actuals  IndicatorActual[]
+  disaggregatedActuals ActualDisaggregation[]
   forms    DataForm[]
+  insights SystemInsight[]
 
   @@map("indicators")
 }
@@ -301,6 +357,10 @@ model IndicatorActual {
   reportingPeriod ReportingPeriod
   actualValue     Float?
   extraFields     Json?
+  // GPS coordinates captured at submission time
+  latitude        Float?
+  longitude       Float?
+  locationName    String?
   submittedById   String
   submittedAt     DateTime         @default(now())
   status          SubmissionStatus @default(draft)
@@ -310,6 +370,9 @@ model IndicatorActual {
   approvedById    String?
   approvedAt      DateTime?
   remarks         String?
+  rejectionReason    String?
+  supervisorReason   String?
+  disaggregations    ActualDisaggregation[]
   attachments     String[]         @default([])
   updatedAt       DateTime         @updatedAt
 
@@ -322,8 +385,14 @@ model IndicatorActual {
   supervisedBy User?       @relation("SupervisedBy",  fields: [supervisedById], references: [id])
   approvedBy   User?       @relation("ApprovedBy",    fields: [approvedById],   references: [id])
   comments     SubmissionComment[]
+  insights     SystemInsight[]
 
   @@unique([indicatorId, institutionId, fiscalYear, reportingPeriod])
+  // Performance indexes for the most common listActuals query patterns
+  @@index([institutionId, fiscalYear, status])
+  @@index([status, fiscalYear])
+  @@index([fiscalYear, reportingPeriod])
+  @@index([submittedById])
   @@map("indicator_actuals")
 }
 
@@ -550,6 +619,13 @@ enum MilestoneStatus {
   ongoing
   completed
   delayed
+}
+
+enum SwotCategory {
+  strength
+  weakness
+  opportunity
+  threat
 }
 
 model Project {
@@ -844,4 +920,330 @@ model FrameworkVersion {
   approvedBy User? @relation("FVApprovedBy", fields: [approvedById], references: [id])
 
   @@map("framework_versions")
+}
+
+// ── Disaggregation Framework ──────────────────────────────────────────────────
+model Disaggregation {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  isGlobal    Boolean  @default(true)
+  isRequired  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  options DisaggregationOption[]
+  actuals ActualDisaggregation[]
+
+  @@map("disaggregations")
+}
+
+model DisaggregationOption {
+  id               String         @id @default(uuid())
+  disaggregationId String
+  label            String
+  code             String?
+  orderNo          Int            @default(0)
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+
+  disaggregation Disaggregation         @relation(fields: [disaggregationId], references: [id], onDelete: Cascade)
+  actuals        ActualDisaggregation[]
+
+  @@unique([disaggregationId, label])
+  @@map("disaggregation_options")
+}
+
+model ActualDisaggregation {
+  id               String               @id @default(uuid())
+  actualId         String
+  indicatorId      String
+  disaggregationId String
+  optionId         String
+  value            Float?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  actual         IndicatorActual      @relation(fields: [actualId],         references: [id], onDelete: Cascade)
+  indicator      Indicator            @relation(fields: [indicatorId],      references: [id])
+  disaggregation Disaggregation       @relation(fields: [disaggregationId], references: [id])
+  option         DisaggregationOption @relation(fields: [optionId],         references: [id])
+
+  @@unique([actualId, disaggregationId, optionId])
+  @@map("actual_disaggregations")
+}
+
+// ── Theory of Change ──────────────────────────────────────────────────────────
+model TheoryOfChange {
+  id          String   @id @default(uuid())
+  level       String
+  referenceId String
+  narrative   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?           @relation(fields: [createdById], references: [id])
+  assumptions ToCAssumption[]
+  risks       ToCRisk[]
+
+  @@unique([level, referenceId])
+  @@map("theory_of_change")
+}
+
+model ToCAssumption {
+  id        String         @id @default(uuid())
+  tocId     String
+  text      String
+  category  String?
+  orderNo   Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  toc TheoryOfChange @relation(fields: [tocId], references: [id], onDelete: Cascade)
+
+  @@map("toc_assumptions")
+}
+
+model ToCRisk {
+  id          String         @id @default(uuid())
+  tocId       String
+  title       String
+  description String?
+  likelihood  String?
+  impact      String?
+  mitigation  String?
+  orderNo     Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  toc TheoryOfChange @relation(fields: [tocId], references: [id], onDelete: Cascade)
+
+  @@map("toc_risks")
+}
+
+// ── MTEF (Medium Term Expenditure Framework) ──────────────────────────────────
+model MtefBudget {
+  id             String   @id @default(uuid())
+  activityId     String
+  institutionId  String
+  year1          String
+  year2          String
+  year3          String
+  year1Budget    Float    @default(0)
+  year2Budget    Float    @default(0)
+  year3Budget    Float    @default(0)
+  totalBudget    Float    @default(0)
+  fundingSource  String?
+  programCode    String?
+  subProgramCode String?
+  currency       String   @default("TZS")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  activity    Activity    @relation(fields: [activityId],    references: [id], onDelete: Cascade)
+  institution Institution @relation(fields: [institutionId], references: [id])
+
+  @@unique([activityId, institutionId])
+  @@map("mtef_budgets")
+}
+
+// ── External Integrations (DHIS2, KoboToolbox, PLANREP, IFMS) ────────────────
+model ExternalIntegration {
+  id                String    @id @default(uuid())
+  system            String    @unique  // 'dhis2'|'kobotoolbox'|'planrep'|'ifms'
+  displayName       String
+  baseUrl           String?
+  apiKey            String?
+  username          String?
+  passwordEncrypted String?
+  clientId          String?   // for OAuth-based systems
+  clientSecret      String?
+  isEnabled         Boolean   @default(false)
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?   // 'success'|'failed'|'partial'
+  lastSyncMessage   String?
+  syncCount         Int       @default(0)
+  syncConfig        Json?     // field mappings, filters, etc.
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  syncLogs ExternalSyncLog[]
+
+  @@map("external_integrations")
+}
+
+model ExternalSyncLog {
+  id            String   @id @default(uuid())
+  integrationId String
+  status        String   // 'success'|'failed'|'partial'
+  message       String?
+  recordsSynced Int      @default(0)
+  errors        Json?
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  integration ExternalIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@map("external_sync_logs")
+}
+
+// ── Automated Email Reports ───────────────────────────────────────────────────
+model EmailSchedule {
+  id          String    @id @default(uuid())
+  name        String
+  recipients  String[]
+  reportType  String    // 'weekly_summary'|'monthly_performance'|'indicator_status'
+  cronExpr    String    // cron expression e.g. '0 8 * * 1'
+  isActive    Boolean   @default(true)
+  lastSentAt  DateTime?
+  params      Json?     // additional filters/config
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("email_schedules")
+}
+
+// ── SMS Logs ──────────────────────────────────────────────────────────────────
+model SmsLog {
+  id        String   @id @default(uuid())
+  to        String
+  message   String
+  status    String   // 'sent'|'failed'|'queued'
+  provider  String   @default("africas_talking")
+  messageId String?
+  cost      Float?
+  error     String?
+  sentAt    DateTime @default(now())
+
+  @@map("sms_logs")
+}
+
+// ── Custom Form Designer ──────────────────────────────────────────────────────
+model CustomForm {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  indicatorId String?
+  schema      Json     // array of field definitions
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User                 @relation(fields: [createdById], references: [id])
+  submissions CustomFormResponse[]
+
+  @@map("custom_forms")
+}
+
+model CustomFormResponse {
+  id            String           @id @default(uuid())
+  formId        String
+  institutionId String?
+  submittedById String
+  data          Json
+  period        ReportingPeriod?
+  fiscalYear    String?
+  latitude      Float?
+  longitude     Float?
+  status        SubmissionStatus @default(draft)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  form        CustomForm   @relation(fields: [formId], references: [id], onDelete: Cascade)
+  submittedBy User         @relation(fields: [submittedById], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id])
+
+  @@map("custom_form_responses")
+}
+
+// ── Account Requests (from login page) ───────────────────────────────────────
+model UserRequest {
+  id              String    @id @default(uuid())
+  name            String
+  email           String
+  institution     String
+  role            String    @default("data_collector")
+  reason          String?
+  status          String    @default("pending")  // pending | approved | rejected
+  rejectionReason String?
+  reviewedAt      DateTime?
+  reviewedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  reviewedBy User? @relation("RequestReviewedBy", fields: [reviewedById], references: [id])
+
+  @@map("user_requests")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("push_subscriptions")
+}
+
+model SwotEntry {
+  id            String       @id @default(uuid())
+  category      SwotCategory
+  area          String
+  description   String
+  impact        String?
+  institutionId String?
+  fiscalYear    String
+  createdById   String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  institution Institution? @relation(fields: [institutionId], references: [id])
+  createdBy   User          @relation(fields: [createdById], references: [id])
+
+  @@map("swot_entries")
+}
+
+// ── Automated Insight Engine ──────────────────────────────────────────────────
+model SystemInsight {
+  id             String   @id @default(uuid())
+  // Context: what this insight is about
+  scope          String   // 'submission' | 'indicator' | 'national' | 'institution'
+  indicatorId    String?
+  actualId       String?
+  institutionId  String?
+  fiscalYear     String?
+  period         String?
+  // Insight content
+  insightType    String   // 'achievement' | 'trend' | 'anomaly' | 'forecast' | 'risk' | 'lagging'
+  severity       String   @default("info")  // 'info' | 'warning' | 'critical'
+  headline       String   // Short bold line e.g. "Below target by 23%"
+  narrative      String   // Full plain-language sentence(s)
+  value          Float?   // The actual value referenced
+  target         Float?   // The target referenced
+  previousValue  Float?   // Last period value (for trend/comparison)
+  changePercent  Float?   // % change vs previous period
+  isRead         Boolean  @default(false)
+  isDismissed    Boolean  @default(false)
+  generatedAt    DateTime @default(now())
+  expiresAt      DateTime?
+
+  indicator   Indicator?       @relation(fields: [indicatorId],    references: [id], onDelete: Cascade)
+  actual      IndicatorActual? @relation(fields: [actualId],        references: [id], onDelete: Cascade)
+  institution Institution?     @relation(fields: [institutionId],   references: [id])
+
+  @@index([scope, fiscalYear, period])
+  @@index([indicatorId])
+  @@index([actualId])
+  @@index([institutionId, fiscalYear])
+  @@map("system_insights")
 }

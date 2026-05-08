@@ -88,6 +88,14 @@ async function deleteKey(req, res) {
 }
 
 async function reactivateKey(req, res) {
+  const key = await prisma.apiKey.findUnique({ where: { id: req.params.id } });
+  if (!key) return res.status(404).json({ error: 'API key not found' });
+  // Only super_admin, or the institution's own admin, can reactivate a key
+  if (req.user.role !== 'super_admin') {
+    if (req.user.role !== 'admin' || key.institutionId !== req.user.institutionId) {
+      return res.status(403).json({ error: 'Insufficient permissions to reactivate this key' });
+    }
+  }
   await prisma.apiKey.update({ where: { id: req.params.id }, data: { isActive: true } });
   res.json({ message: 'Key reactivated' });
 }

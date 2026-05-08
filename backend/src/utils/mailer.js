@@ -127,10 +127,13 @@ async function sendSubmissionNotification(email, name, { indicatorName, period, 
 
 // ── Approval/rejection notification — sent to data submitter ──────────────────
 async function sendApprovalNotification(email, name, { indicatorName, period, fiscalYear, status, remarks }) {
-  const appUrl     = process.env.APP_URL || 'http://localhost:5173';
-  const isApproved = status === 'approved';
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const isSupervisorApproved = status === 'supervisor_approved';
+  const isApproved  = status === 'approved' || isSupervisorApproved;
   const headerColor = isApproved ? '#15803d' : '#b91c1c';
-  const statusLabel = isApproved ? 'Approved ✓' : 'Returned for Correction';
+  const statusLabel = isSupervisorApproved
+    ? 'Passed Supervisor Review ✓'
+    : isApproved ? 'Approved ✓' : 'Returned for Correction';
 
   await sendMail({
     to: email,
@@ -162,10 +165,101 @@ async function sendApprovalNotification(email, name, { indicatorName, period, fi
   });
 }
 
+/**
+ * Send login credentials to a newly approved/created user.
+ * @param {string} sendTo     - Address to deliver the email (personal/contact email)
+ * @param {string} name       - User's full name
+ * @param {string} loginEmail - The MIT email they use to sign in (may differ from sendTo)
+ * @param {string} password   - Plain-text temporary password
+ */
+async function sendWelcomeEmail(sendTo, name, loginEmail, password) {
+  // Backwards-compat: if called with 3 args (sendTo, name, password) loginEmail === password
+  if (password === undefined) { password = loginEmail; loginEmail = sendTo; }
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  await sendMail({
+    to: sendTo,
+    subject: 'Your MIT M&E System Account Has Been Created',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;">
+        <div style="background:#1a3a5c;padding:20px 28px;border-radius:8px 8px 0 0;">
+          <h2 style="color:#fff;margin:0;font-size:18px;">Ministry of Industry & Trade</h2>
+          <p style="color:#90b4d4;margin:4px 0 0;font-size:13px;">M&amp;E System — Account Created</p>
+        </div>
+        <div style="background:#f9fafb;padding:28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;">
+          <p style="margin:0 0 16px;">Hello <strong>${name}</strong>,</p>
+          <p style="color:#374151;margin:0 0 20px;">
+            Your account on the <strong>MIT M&amp;E System</strong> has been approved and created.
+            Use the credentials below to sign in:
+          </p>
+          <div style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:8px;padding:16px 20px;margin:0 0 20px;">
+            <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Login URL</p>
+            <a href="${appUrl}/login" style="color:#1a3a5c;font-weight:bold;font-size:14px;word-break:break-all;">${appUrl}/login</a>
+            <hr style="border:none;border-top:1px solid #d1d5db;margin:14px 0;">
+            <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">Email (Username)</p>
+            <p style="margin:0 0 14px;font-weight:bold;font-size:15px;color:#111827;">${loginEmail}</p>
+            <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">Temporary Password</p>
+            <p style="margin:0;font-weight:bold;font-size:18px;color:#1a3a5c;letter-spacing:2px;">${password}</p>
+          </div>
+          <a href="${appUrl}/login" style="display:inline-block;background:#1a3a5c;color:#fff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:bold;font-size:14px;">
+            Sign In Now →
+          </a>
+          <div style="margin-top:20px;background:#fefce8;border:1px solid #fde047;border-radius:6px;padding:12px 16px;">
+            <p style="margin:0;font-size:12px;color:#713f12;">
+              <strong>Important:</strong> Please change your password after your first login via
+              <em>Settings → Security</em>.
+            </p>
+          </div>
+          <p style="margin:20px 0 0;font-size:11px;color:#9ca3af;">
+            Ministry of Industry and Trade · M&amp;E System<br>
+            If you did not request this account, please ignore this email.
+          </p>
+        </div>
+      </div>
+    `,
+    text: `Hello ${name},\n\nYour MIT M&E System account has been created.\n\nLogin URL: ${appUrl}/login\nEmail: ${loginEmail}\nPassword: ${password}\n\nPlease change your password after first login.\n\nMinistry of Industry and Trade`,
+  });
+}
+
+/**
+ * Notify a user that their account request was rejected.
+ */
+async function sendRejectionEmail(email, name, reason) {
+  await sendMail({
+    to: email,
+    subject: 'MIT M&E System — Account Request Update',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;">
+        <div style="background:#1a3a5c;padding:20px 28px;border-radius:8px 8px 0 0;">
+          <h2 style="color:#fff;margin:0;font-size:18px;">Ministry of Industry & Trade</h2>
+          <p style="color:#90b4d4;margin:4px 0 0;font-size:13px;">M&amp;E System — Account Request</p>
+        </div>
+        <div style="background:#f9fafb;padding:28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;">
+          <p style="margin:0 0 16px;">Hello <strong>${name}</strong>,</p>
+          <p style="color:#374151;margin:0 0 16px;">
+            Thank you for your interest in the MIT M&amp;E System. After review, we are unable
+            to approve your account request at this time.
+          </p>
+          ${reason ? `
+          <div style="background:#fef2f2;border-left:4px solid #b91c1c;padding:12px 16px;margin:16px 0;border-radius:0 6px 6px 0;">
+            <p style="margin:0;font-size:13px;color:#374151;"><strong>Reason:</strong> ${reason}</p>
+          </div>` : ''}
+          <p style="color:#374151;font-size:13px;margin:16px 0 0;">
+            If you believe this is an error, please contact your system administrator.
+          </p>
+          <p style="margin:20px 0 0;font-size:11px;color:#9ca3af;">Ministry of Industry and Trade · M&amp;E System</p>
+        </div>
+      </div>
+    `,
+    text: `Hello ${name},\n\nYour account request for the MIT M&E System could not be approved at this time.${reason ? `\n\nReason: ${reason}` : ''}\n\nContact your administrator if you believe this is an error.\n\nMinistry of Industry and Trade`,
+  });
+}
+
 module.exports = {
   sendMail,
   sendPasswordResetEmail,
   sendAccountLockedEmail,
   sendSubmissionNotification,
   sendApprovalNotification,
+  sendWelcomeEmail,
+  sendRejectionEmail,
 };

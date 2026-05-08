@@ -2,6 +2,7 @@
 
 const prisma = require('../../config/db');
 const { getCurrentFiscalYear } = require('../../utils/fiscalYear');
+const aiService = require('../../services/ai/ai.service');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -137,14 +138,20 @@ async function trends(req, res) {
       return { period, fiscalYear: fy, actual, target, achievement };
     });
 
-  const current  = buildPeriodRows(currentActuals,  currentTargets,  fiscalYear);
-  const previous = previousFY
+  const currentRows  = buildPeriodRows(currentActuals,  currentTargets,  fiscalYear);
+  const previousRows = previousFY
     ? buildPeriodRows(previousActuals, previousTargets, previousFY)
     : [];
 
+  // Convert array rows → { Q1: achievement%, Q2: ... } objects for frontend
+  const toMap = (rows) => Object.fromEntries(rows.map(r => [r.period, r.achievement]));
+
+  const currentMap  = toMap(currentRows);
+  const previousMap = toMap(previousRows);
+
   // Trend: compare average achievement of current vs previous
-  const currentAvg  = avg(current.map(r => r.achievement));
-  const previousAvg = avg(previous.map(r => r.achievement));
+  const currentAvg  = avg(currentRows.map(r => r.achievement));
+  const previousAvg = avg(previousRows.map(r => r.achievement));
 
   let trend = 'stable';
   if (currentAvg != null && previousAvg != null) {
@@ -154,7 +161,13 @@ async function trends(req, res) {
     trend = 'stable'; // no baseline for comparison
   }
 
-  return res.json({ indicator, current, previous, trend });
+  return res.json({
+    indicatorName: indicator.name,
+    indicatorCode: indicator.code,
+    current:  currentMap,
+    previous: previousMap,
+    trend,
+  });
 }
 
 // ── 2. Rankings ───────────────────────────────────────────────────────────────
@@ -187,13 +200,19 @@ async function rankings(req, res) {
   const targetCol = PERIOD_TARGET_COL[period];
   if (!targetCol) return res.status(400).json({ error: 'Invalid period' });
 
+  // institutionId is non-nullable (always set), so no null-filter needed for Institution.
+  // departmentId / unitId are nullable — filter them to exclude null.
+  const nullFilter = ownerType === 'Institution'
+    ? {}
+    : { [entityIdField]: { not: null } };
+
   // Fetch approved actuals for the period
   const actuals = await prisma.indicatorActual.findMany({
     where: {
       fiscalYear,
       reportingPeriod: period,
       status: 'approved',
-      NOT: { [entityIdField]: null },
+      ...nullFilter,
     },
     select: {
       indicatorId: true,
@@ -202,7 +221,7 @@ async function rankings(req, res) {
     },
   });
 
-  if (actuals.length === 0) return res.json([]);
+  if (actuals.length === 0) return res.json({ rankings: [] });
 
   // Collect unique entity IDs and indicator IDs
   const entityIds    = [...new Set(actuals.map(a => a[entityIdField]).filter(Boolean))];
@@ -310,14 +329,16 @@ async function rankings(req, res) {
 
   const ranked = rows.map((r, idx) => ({
     rank:           idx + 1,
-    entity:         entityNames[r.entityId] ?? { id: r.entityId, name: 'Unknown' },
-    indicators:     r.indicators,
+    id:             r.entityId,
+    name:           entityNames[r.entityId]?.name ?? 'Unknown',
+    code:           entityNames[r.entityId]?.code ?? null,
+    indicatorCount: r.indicators,
     avgAchievement: r.avgAchievement,
     totalActual:    r.totalActual,
     totalTarget:    r.totalTarget,
   }));
 
-  return res.json(ranked);
+  return res.json({ rankings: ranked });
 }
 
 // ── 3. Forecasting ────────────────────────────────────────────────────────────
@@ -434,14 +455,18 @@ async function forecasting(req, res) {
     else                 likelihood = 'off_track';
   }
 
+  const currentTotal = [q1, q2, q3].filter(v => v != null).reduce((s, v) => s + v, 0) || null;
+
   return res.json({
-    indicator,
+    indicatorName:   indicator.name,
+    indicatorCode:   indicator.code,
     fiscalYear,
-    current: { q1, q2, q3, q4_actual: q4Actual },
-    projected: {
-      q4:     projectedQ4     != null ? Math.round(projectedQ4     * 100) / 100 : null,
-      annual: projectedAnnual != null ? Math.round(projectedAnnual * 100) / 100 : null,
-    },
+    // actuals object keyed by period (frontend uses data.actuals?.Q1 etc.)
+    actuals: { Q1: q1, Q2: q2, Q3: q3, Q4: q4Actual },
+    // flat projection fields (frontend uses data.projectedQ4, data.projectedAnnual)
+    projectedQ4:      projectedQ4     != null ? Math.round(projectedQ4     * 100) / 100 : null,
+    projectedAnnual:  projectedAnnual != null ? Math.round(projectedAnnual * 100) / 100 : null,
+    currentTotal,
     annualTarget,
     likelihood,
   });
@@ -480,7 +505,7 @@ async function performanceMatrix(req, res) {
   });
 
   if (institutions.length === 0 || indicators.length === 0) {
-    return res.json({ headers: [], rows: [] });
+    return res.json({ entities: [], indicators: [], matrix: {} });
   }
 
   const institutionIds = institutions.map(i => i.id);
@@ -521,25 +546,24 @@ async function performanceMatrix(req, res) {
     targetMap[key] = (targetMap[key] ?? 0) + (t[targetCol] ?? 0);
   }
 
-  // Build matrix rows
-  const rows = institutions.map(inst => {
-    const cells = indicators.map(ind => {
+  // Build matrix in { matrix[entityId][indicatorId] = achievement% } format
+  const matrixObj = {};
+  for (const inst of institutions) {
+    matrixObj[inst.id] = {};
+    for (const ind of indicators) {
       const key    = `${inst.id}::${ind.id}`;
       const actual = actualMap[key];
       const target = targetMap[key];
-      return safePct(actual, target);
-    });
-    return {
-      entity: { id: inst.id, name: inst.name, code: inst.code },
-      cells,
-    };
-  });
+      matrixObj[inst.id][ind.id] = safePct(actual, target);
+    }
+  }
 
   return res.json({
     fiscalYear,
     period,
-    headers: indicators.map(i => ({ id: i.id, name: i.name, code: i.code })),
-    rows,
+    entities:   institutions.map(i => ({ id: i.id, name: i.name, code: i.code })),
+    indicators: indicators.map(i => ({ id: i.id, name: i.name, code: i.code })),
+    matrix:     matrixObj,
   });
 }
 
@@ -715,10 +739,10 @@ async function summary(req, res) {
       const avgAch = pctsArr.length
         ? Math.round((pctsArr.reduce((s, v) => s + v, 0) / pctsArr.length) * 100) / 100
         : null;
-      return { entity: { id: inst.id, name: inst.name, code: inst.code }, avgAchievement: avgAch };
+      return { id: inst.id, name: inst.name, code: inst.code, achievement: avgAch };
     })
-    .filter(r => r.avgAchievement != null)
-    .sort((a, b) => b.avgAchievement - a.avgAchievement);
+    .filter(r => r.achievement != null)
+    .sort((a, b) => b.achievement - a.achievement);
 
   const top3    = instStats.slice(0, 3);
   const bottom3 = instStats.slice(-3).reverse();
@@ -726,21 +750,652 @@ async function summary(req, res) {
   return res.json({
     fiscalYear,
     period: period || 'all',
-    submissions: {
-      byStatus: submissionsByStatus,
-      total: totalSubmissions,
-    },
+    // Flat submission counts (expected by frontend)
+    totalSubmissions,
+    approvedSubmissions: submissionsByStatus.approved ?? 0,
+    pendingSubmissions:  (submissionsByStatus.submitted ?? 0) + (submissionsByStatus.pending_supervisor ?? 0) + (submissionsByStatus.pending_me ?? 0),
+    rejectedSubmissions: submissionsByStatus.rejected ?? 0,
+    // Achievement
     overallAchievement,
-    indicators: {
-      on_track:  onTrackCount,
-      at_risk:   atRiskCount,
-      off_track: offTrackCount,
-      total:     onTrackCount + atRiskCount + offTrackCount,
-    },
+    // Status counts (flat names expected by frontend)
+    onTrack:  onTrackCount,
+    atRisk:   atRiskCount,
+    offTrack: offTrackCount,
+    // Compliance
     complianceRate,
+    // Performers
     topPerformers:    top3,
     bottomPerformers: bottom3,
   });
 }
 
-module.exports = { trends, rankings, forecasting, performanceMatrix, summary };
+// ── 6. Descriptive Statistics ─────────────────────────────────────────────────
+/**
+ * GET /api/analytics/descriptive?indicatorId=&fiscalYear=&period=&institutionId=
+ *
+ * Returns n, mean, median, std-dev, min, max, P25, P75, P90 and a frequency
+ * distribution (10 buckets) for approved actual values of one indicator.
+ */
+async function descriptive(req, res) {
+  const {
+    indicatorId,
+    fiscalYear = getCurrentFiscalYear(),
+    period,
+    institutionId,
+  } = req.query;
+
+  if (!indicatorId) return res.status(400).json({ error: 'indicatorId is required' });
+
+  const indicator = await prisma.indicator.findUnique({
+    where: { id: indicatorId },
+    select: { id: true, name: true, code: true, unit: true },
+  });
+  if (!indicator) return res.status(404).json({ error: 'Indicator not found' });
+
+  const where = {
+    indicatorId,
+    fiscalYear,
+    status: 'approved',
+    actualValue: { not: null },
+    ...(period        ? { reportingPeriod: period }  : {}),
+    ...(institutionId ? { institutionId }             : {}),
+  };
+
+  const actuals = await prisma.indicatorActual.findMany({
+    where,
+    select: {
+      actualValue: true,
+      reportingPeriod: true,
+      institution: { select: { name: true, code: true } },
+    },
+    orderBy: { actualValue: 'asc' },
+  });
+
+  const values = actuals.map(a => a.actualValue).filter(v => v != null);
+  const n = values.length;
+
+  if (n === 0) {
+    return res.json({
+      indicatorName: indicator.name,
+      indicatorCode: indicator.code,
+      unit: indicator.unit,
+      n: 0, mean: null, median: null, stdDev: null,
+      min: null, max: null, p25: null, p75: null, p90: null,
+      distribution: [],
+    });
+  }
+
+  // Sort ascending (already sorted by Prisma)
+  const sorted = [...values].sort((a, b) => a - b);
+
+  const mean = sorted.reduce((s, v) => s + v, 0) / n;
+
+  const percentile = (p) => {
+    const idx = (p / 100) * (n - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+  };
+
+  const variance = sorted.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
+  const stdDev = Math.sqrt(variance);
+
+  // Frequency distribution — 10 equal-width buckets
+  const minV = sorted[0];
+  const maxV = sorted[n - 1];
+  const BUCKETS = 10;
+  const bucketWidth = maxV > minV ? (maxV - minV) / BUCKETS : 1;
+  const distribution = Array.from({ length: BUCKETS }, (_, i) => ({
+    from:  Math.round((minV + i * bucketWidth) * 100) / 100,
+    to:    Math.round((minV + (i + 1) * bucketWidth) * 100) / 100,
+    count: 0,
+  }));
+
+  for (const v of sorted) {
+    const idx = Math.min(Math.floor((v - minV) / bucketWidth), BUCKETS - 1);
+    distribution[idx].count++;
+  }
+
+  // Per-institution breakdown for scatter/box plots
+  const byInstitution = actuals.map(a => ({
+    institution: a.institution?.name ?? 'Unknown',
+    code:        a.institution?.code ?? '',
+    period:      a.reportingPeriod,
+    value:       a.actualValue,
+  }));
+
+  return res.json({
+    indicatorName: indicator.name,
+    indicatorCode: indicator.code,
+    unit:          indicator.unit,
+    n,
+    mean:   Math.round(mean   * 100) / 100,
+    median: Math.round(percentile(50) * 100) / 100,
+    stdDev: Math.round(stdDev * 100) / 100,
+    min:    sorted[0],
+    max:    sorted[n - 1],
+    p25:    Math.round(percentile(25) * 100) / 100,
+    p75:    Math.round(percentile(75) * 100) / 100,
+    p90:    Math.round(percentile(90) * 100) / 100,
+    distribution,
+    dataPoints: byInstitution,
+  });
+}
+
+// ── 7. Variance Analysis ──────────────────────────────────────────────────────
+/**
+ * GET /api/analytics/variance?fiscalYear=&period=&institutionId=
+ *
+ * For every indicator that has a target for this period, returns the gap
+ * between target and actual: absolute variance and % variance.
+ */
+async function varianceAnalysis(req, res) {
+  const {
+    fiscalYear = getCurrentFiscalYear(),
+    period,
+    institutionId,
+  } = req.query;
+
+  if (!period) return res.status(400).json({ error: 'period is required' });
+  const targetCol = PERIOD_TARGET_COL[period];
+  if (!targetCol) return res.status(400).json({ error: 'Invalid period' });
+
+  const targetWhere = {
+    fiscalYear,
+    ...(institutionId ? { institutionId } : {}),
+    [targetCol]: { not: null },
+  };
+
+  const [targets, actuals] = await Promise.all([
+    prisma.indicatorTarget.findMany({
+      where: targetWhere,
+      select: {
+        indicatorId: true,
+        institutionId: true,
+        [targetCol]: true,
+        indicator: { select: { id: true, name: true, code: true, unit: true } },
+      },
+    }),
+    prisma.indicatorActual.findMany({
+      where: {
+        fiscalYear,
+        reportingPeriod: period,
+        status: 'approved',
+        ...(institutionId ? { institutionId } : {}),
+      },
+      select: { indicatorId: true, institutionId: true, actualValue: true },
+    }),
+  ]);
+
+  // Build actual lookup: indicatorId::institutionId → sum of actuals
+  const actualMap = {};
+  for (const a of actuals) {
+    const key = `${a.indicatorId}::${a.institutionId}`;
+    actualMap[key] = (actualMap[key] ?? 0) + (a.actualValue ?? 0);
+  }
+
+  // Group targets by indicator
+  const indicatorMap = {};
+  for (const t of targets) {
+    const iid = t.indicatorId;
+    if (!indicatorMap[iid]) {
+      indicatorMap[iid] = { indicator: t.indicator, target: 0, actual: 0 };
+    }
+    indicatorMap[iid].target += t[targetCol] ?? 0;
+    const key = `${iid}::${t.institutionId}`;
+    indicatorMap[iid].actual += actualMap[key] ?? 0;
+  }
+
+  const rows = Object.values(indicatorMap)
+    .filter(r => r.indicator)
+    .map(r => {
+      const gap    = r.actual - r.target;
+      const gapPct = r.target > 0 ? Math.round((gap / r.target) * 10000) / 100 : null;
+      const achievement = r.target > 0 ? Math.round((r.actual / r.target) * 10000) / 100 : null;
+      const status =
+        achievement === null  ? 'no_data'
+        : achievement >= 90   ? 'on_track'
+        : achievement >= 60   ? 'at_risk'
+        : 'off_track';
+      return {
+        indicatorId:   r.indicator.id,
+        indicatorName: r.indicator.name,
+        indicatorCode: r.indicator.code,
+        unit:          r.indicator.unit,
+        target:        Math.round(r.target  * 100) / 100,
+        actual:        Math.round(r.actual  * 100) / 100,
+        gap:           Math.round(gap       * 100) / 100,
+        gapPct,
+        achievement,
+        status,
+      };
+    })
+    .sort((a, b) => (a.achievement ?? 200) - (b.achievement ?? 200)); // worst first
+
+  return res.json({ fiscalYear, period, rows });
+}
+
+// ── 8. Disaggregation Analysis ────────────────────────────────────────────────
+/**
+ * GET /api/analytics/disaggregation?indicatorId=&fiscalYear=&period=&disaggregationId=&institutionId=
+ *
+ * Aggregates ActualDisaggregation values by dimension option.
+ * If disaggregationId is omitted, returns all dimensions for that indicator.
+ */
+async function disaggregationAnalysis(req, res) {
+  const {
+    indicatorId,
+    fiscalYear = getCurrentFiscalYear(),
+    period,
+    disaggregationId,
+    institutionId,
+  } = req.query;
+
+  if (!indicatorId) return res.status(400).json({ error: 'indicatorId is required' });
+
+  const indicator = await prisma.indicator.findUnique({
+    where: { id: indicatorId },
+    select: { id: true, name: true, code: true, unit: true },
+  });
+  if (!indicator) return res.status(404).json({ error: 'Indicator not found' });
+
+  // Find approved actuals for this indicator
+  const actuals = await prisma.indicatorActual.findMany({
+    where: {
+      indicatorId,
+      fiscalYear,
+      status: 'approved',
+      ...(period        ? { reportingPeriod: period } : {}),
+      ...(institutionId ? { institutionId }           : {}),
+    },
+    select: { id: true },
+  });
+  const actualIds = actuals.map(a => a.id);
+
+  if (actualIds.length === 0) {
+    return res.json({
+      indicatorName: indicator.name,
+      indicatorCode: indicator.code,
+      disaggregations: [],
+    });
+  }
+
+  const disaggWhere = {
+    actualId:    { in: actualIds },
+    indicatorId,
+    ...(disaggregationId ? { disaggregationId } : {}),
+  };
+
+  const entries = await prisma.actualDisaggregation.findMany({
+    where: disaggWhere,
+    select: {
+      disaggregationId: true,
+      disaggregation: { select: { id: true, name: true } },
+      option:         { select: { id: true, label: true, code: true, orderNo: true } },
+      value:          true,
+    },
+  });
+
+  // Group by disaggregation dimension
+  const dimMap = {};
+  for (const e of entries) {
+    const did   = e.disaggregationId;
+    const dname = e.disaggregation.name;
+    if (!dimMap[did]) dimMap[did] = { id: did, name: dname, options: {} };
+
+    const oid   = e.option.id;
+    if (!dimMap[did].options[oid]) {
+      dimMap[did].options[oid] = {
+        id: oid, label: e.option.label, code: e.option.code,
+        orderNo: e.option.orderNo, total: 0, count: 0,
+      };
+    }
+    dimMap[did].options[oid].total += e.value ?? 0;
+    dimMap[did].options[oid].count++;
+  }
+
+  // Convert to array, compute percentages
+  const disaggregations = Object.values(dimMap).map(dim => {
+    const opts = Object.values(dim.options).sort((a, b) => a.orderNo - b.orderNo);
+    const grandTotal = opts.reduce((s, o) => s + o.total, 0);
+    return {
+      id:   dim.id,
+      name: dim.name,
+      options: opts.map(o => ({
+        id:    o.id,
+        label: o.label,
+        code:  o.code,
+        total: Math.round(o.total * 100) / 100,
+        count: o.count,
+        pct:   grandTotal > 0 ? Math.round((o.total / grandTotal) * 10000) / 100 : 0,
+      })),
+      grandTotal: Math.round(grandTotal * 100) / 100,
+    };
+  });
+
+  return res.json({
+    indicatorName: indicator.name,
+    indicatorCode: indicator.code,
+    unit:          indicator.unit,
+    disaggregations,
+  });
+}
+
+// ── 9. Cost-Benefit Analysis ──────────────────────────────────────────────────
+/**
+ * GET /api/analytics/cost-benefit?fiscalYear=&institutionId=
+ *
+ * Per institution: total budget, total expenditure, total approved actuals,
+ * avg achievement %, cost per unit of output, efficiency ratio.
+ */
+async function costBenefit(req, res) {
+  const {
+    fiscalYear = getCurrentFiscalYear(),
+    institutionId,
+  } = req.query;
+
+  // Budget plans for the fiscal year
+  const budgetPlans = await prisma.budgetPlan.findMany({
+    where: {
+      fiscalYear,
+      ...(institutionId ? { institutionId } : {}),
+    },
+    select: {
+      institutionId: true,
+      totalBudget: true,
+      totalSpent: true,
+      institution: { select: { id: true, name: true, code: true } },
+    },
+  });
+
+  // Approved actuals for the fiscal year
+  const actuals = await prisma.indicatorActual.findMany({
+    where: {
+      fiscalYear,
+      status: 'approved',
+      ...(institutionId ? { institutionId } : {}),
+    },
+    select: { institutionId: true, actualValue: true, indicatorId: true, reportingPeriod: true },
+  });
+
+  // Targets for achievement calculation
+  const targets = await prisma.indicatorTarget.findMany({
+    where: {
+      fiscalYear,
+      ...(institutionId ? { institutionId } : {}),
+    },
+    select: { institutionId: true, indicatorId: true, annualTarget: true, q4Target: true },
+  });
+
+  const targetMap = {};
+  for (const t of targets) {
+    const key = `${t.institutionId}::${t.indicatorId}`;
+    targetMap[key] = (t.annualTarget ?? t.q4Target) ?? 0;
+  }
+
+  // Group actuals and compute achievement per institution
+  const instActuals = {};
+  for (const a of actuals) {
+    if (!instActuals[a.institutionId]) instActuals[a.institutionId] = [];
+    instActuals[a.institutionId].push(a);
+  }
+
+  // Build per-institution result
+  const budgetByInst = {};
+  for (const bp of budgetPlans) {
+    const iid = bp.institutionId;
+    if (!budgetByInst[iid]) budgetByInst[iid] = { institution: bp.institution, budget: 0, spent: 0 };
+    budgetByInst[iid].budget += bp.totalBudget ?? 0;
+    budgetByInst[iid].spent  += bp.totalSpent  ?? 0;
+  }
+
+  const allInstIds = new Set([
+    ...Object.keys(budgetByInst),
+    ...Object.keys(instActuals),
+  ]);
+
+  // Fetch institutions not in budgetPlans
+  const missingInsts = [...allInstIds].filter(id => !budgetByInst[id]);
+  if (missingInsts.length > 0) {
+    const insts = await prisma.institution.findMany({
+      where: { id: { in: missingInsts } },
+      select: { id: true, name: true, code: true },
+    });
+    for (const inst of insts) {
+      budgetByInst[inst.id] = { institution: inst, budget: 0, spent: 0 };
+    }
+  }
+
+  const rows = [...allInstIds].map(iid => {
+    const budget  = budgetByInst[iid]?.budget ?? 0;
+    const spent   = budgetByInst[iid]?.spent  ?? 0;
+    const inst    = budgetByInst[iid]?.institution;
+    const aRows   = instActuals[iid] ?? [];
+
+    const totalOutput = aRows.reduce((s, a) => s + (a.actualValue ?? 0), 0);
+
+    // Achievement = avg across indicators that have targets
+    const achievementPcts = [];
+    const seenIndicators = new Set();
+    for (const a of aRows) {
+      if (seenIndicators.has(a.indicatorId)) continue;
+      seenIndicators.add(a.indicatorId);
+      const tKey = `${iid}::${a.indicatorId}`;
+      const t = targetMap[tKey];
+      if (t && t > 0) {
+        // Sum actuals across all periods for this indicator
+        const indTotal = aRows.filter(x => x.indicatorId === a.indicatorId).reduce((s, x) => s + (x.actualValue ?? 0), 0);
+        achievementPcts.push((indTotal / t) * 100);
+      }
+    }
+    const avgAchievement = achievementPcts.length
+      ? Math.round((achievementPcts.reduce((s, v) => s + v, 0) / achievementPcts.length) * 100) / 100
+      : null;
+
+    const absorptionRate = budget > 0 ? Math.round((spent / budget) * 10000) / 100 : null;
+    // Efficiency: achievement per unit of absorption (100 = perfectly efficient)
+    const efficiency = avgAchievement != null && absorptionRate != null && absorptionRate > 0
+      ? Math.round((avgAchievement / absorptionRate) * 100) / 100
+      : null;
+    // Cost per unit of output (in currency units)
+    const costPerOutput = totalOutput > 0 && spent > 0
+      ? Math.round((spent / totalOutput) * 100) / 100
+      : null;
+
+    return {
+      institutionId:  iid,
+      institutionName: inst?.name ?? 'Unknown',
+      institutionCode: inst?.code ?? '',
+      budget:          Math.round(budget * 100) / 100,
+      spent:           Math.round(spent  * 100) / 100,
+      absorptionRate,
+      totalOutput:     Math.round(totalOutput * 100) / 100,
+      avgAchievement,
+      efficiency,
+      costPerOutput,
+    };
+  }).filter(r => r.budget > 0 || r.totalOutput > 0)
+    .sort((a, b) => (b.efficiency ?? -1) - (a.efficiency ?? -1));
+
+  return res.json({ fiscalYear, rows });
+}
+
+// ── 10. RBM Logframe ─────────────────────────────────────────────────────────
+/**
+ * GET /api/analytics/rbm-logframe?fiscalYear=&institutionId=
+ *
+ * Full Results-Based Management logframe:
+ * Objective → Outcome → Output → Indicator → baseline / target / actual / achievement
+ */
+async function rbmLogframe(req, res) {
+  const {
+    fiscalYear = getCurrentFiscalYear(),
+    institutionId,
+  } = req.query;
+
+  // Load the full RF chain
+  const objectives = await prisma.strategicObjective.findMany({
+    where: { isActive: true },
+    orderBy: { orderNo: 'asc' },
+    include: {
+      outcomes: {
+        where: { isActive: true },
+        orderBy: { orderNo: 'asc' },
+        include: {
+          outputs: {
+            where: { isActive: true },
+            orderBy: { orderNo: 'asc' },
+            include: {
+              indicators: {
+                where: { isActive: true },
+                orderBy: { code: 'asc' },
+                select: {
+                  id: true, name: true, code: true, unit: true,
+                  baselineValue: true, baselineYear: true,
+                  progressDirection: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (objectives.length === 0) return res.json({ fiscalYear, objectives: [] });
+
+  // Collect all indicator IDs
+  const indicatorIds = [];
+  for (const obj of objectives)
+    for (const out of obj.outcomes)
+      for (const outp of out.outputs)
+        for (const ind of outp.indicators)
+          indicatorIds.push(ind.id);
+
+  if (indicatorIds.length === 0) return res.json({ fiscalYear, objectives: [] });
+
+  // Fetch targets (sum across institutions if no filter)
+  const targets = await prisma.indicatorTarget.findMany({
+    where: {
+      indicatorId: { in: indicatorIds },
+      fiscalYear,
+      ...(institutionId ? { institutionId } : {}),
+    },
+    select: {
+      indicatorId: true,
+      q1Target: true, q2Target: true, q3Target: true,
+      q4Target: true, annualTarget: true,
+    },
+  });
+
+  // Fetch approved actuals
+  const actuals = await prisma.indicatorActual.findMany({
+    where: {
+      indicatorId:    { in: indicatorIds },
+      fiscalYear,
+      status:         'approved',
+      ...(institutionId ? { institutionId } : {}),
+    },
+    select: { indicatorId: true, reportingPeriod: true, actualValue: true },
+  });
+
+  // Aggregate by indicator
+  const targetByInd = {};
+  for (const t of targets) {
+    const iid = t.indicatorId;
+    if (!targetByInd[iid]) targetByInd[iid] = { q1: 0, q2: 0, q3: 0, q4: 0, annual: 0 };
+    targetByInd[iid].q1     += t.q1Target     ?? 0;
+    targetByInd[iid].q2     += t.q2Target     ?? 0;
+    targetByInd[iid].q3     += t.q3Target     ?? 0;
+    targetByInd[iid].q4     += t.q4Target     ?? 0;
+    targetByInd[iid].annual += t.annualTarget  ?? 0;
+  }
+
+  const actualByInd = {};
+  for (const a of actuals) {
+    const iid = a.indicatorId;
+    if (!actualByInd[iid]) actualByInd[iid] = { Q1: 0, Q2: 0, Q3: 0, Q4: 0, Annual: 0 };
+    actualByInd[iid][a.reportingPeriod] = (actualByInd[iid][a.reportingPeriod] ?? 0) + (a.actualValue ?? 0);
+  }
+
+  // Build logframe
+  const buildIndicator = (ind) => {
+    const t = targetByInd[ind.id] ?? {};
+    const a = actualByInd[ind.id] ?? {};
+    const annualTarget  = t.annual  || t.q4 || null;
+    const cumulativeActual = (a.Q1 ?? 0) + (a.Q2 ?? 0) + (a.Q3 ?? 0) + (a.Q4 ?? 0);
+    const achievement   = annualTarget && annualTarget > 0
+      ? Math.round((cumulativeActual / annualTarget) * 10000) / 100
+      : null;
+    const status =
+      achievement === null  ? 'no_data'
+      : achievement >= 90   ? 'on_track'
+      : achievement >= 60   ? 'at_risk'
+      : 'off_track';
+
+    return {
+      id:   ind.id,
+      name: ind.name,
+      code: ind.code,
+      unit: ind.unit,
+      progressDirection: ind.progressDirection,
+      baseline:   { value: ind.baselineValue, year: ind.baselineYear },
+      targets:    { Q1: t.q1||null, Q2: t.q2||null, Q3: t.q3||null, Q4: t.q4||null, Annual: annualTarget },
+      actuals:    { Q1: a.Q1||null, Q2: a.Q2||null, Q3: a.Q3||null, Q4: a.Q4||null },
+      cumulativeActual,
+      achievement,
+      status,
+    };
+  };
+
+  const logframe = objectives.map(obj => ({
+    id: obj.id, name: obj.name, code: obj.code,
+    outcomes: obj.outcomes.map(out => ({
+      id: out.id, name: out.name, code: out.code,
+      outputs: out.outputs.map(outp => ({
+        id: outp.id, name: outp.name, code: outp.code,
+        indicators: outp.indicators.map(buildIndicator),
+      })),
+    })),
+  }));
+
+  return res.json({ fiscalYear, objectives: logframe });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AI INSIGHTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function aiAnomalies(req, res) {
+  const { fiscalYear, threshold } = req.query;
+  const data = await aiService.detectAnomalies({
+    fiscalYear: fiscalYear || getCurrentFiscalYear(),
+    threshold: threshold ? parseFloat(threshold) : 2.0,
+  });
+  res.json({ anomalies: data, count: data.length });
+}
+
+async function aiRiskScores(req, res) {
+  const { fiscalYear } = req.query;
+  const data = await aiService.computeRiskScores({ fiscalYear: fiscalYear || getCurrentFiscalYear() });
+  res.json({ risks: data, count: data.length });
+}
+
+async function aiForecasting(req, res) {
+  const { indicatorId, fiscalYear, institutionId } = req.query;
+  if (!indicatorId) return res.status(400).json({ error: 'indicatorId required' });
+  const data = await aiService.forecastIndicator({ indicatorId, fiscalYear, institutionId });
+  res.json(data);
+}
+
+async function aiRunAlerts(req, res) {
+  const { fiscalYear } = req.body ?? {};
+  const result = await aiService.generateAiAlerts(fiscalYear);
+  res.json(result);
+}
+
+module.exports = {
+  trends, rankings, forecasting, performanceMatrix, summary,
+  descriptive, varianceAnalysis, disaggregationAnalysis, costBenefit, rbmLogframe,
+  aiAnomalies, aiRiskScores, aiForecasting, aiRunAlerts,
+};

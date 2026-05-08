@@ -60,7 +60,7 @@ export default function ExpenditurePage() {
             <label className="label">Budget Plan *</label>
             <select className="input" defaultValue={planId || ''} {...register('budgetPlanId', { required: true })}>
               <option value="">Select plan...</option>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.activity?.name} - {p.institution?.name}</option>)}
+              {plans.map(p => <option key={p.id} value={p.id}>{p.activity?.name} · {p.institution?.name}</option>)}
             </select>
           </div>
           <div>

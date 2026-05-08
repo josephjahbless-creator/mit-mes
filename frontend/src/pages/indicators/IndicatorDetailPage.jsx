@@ -1,10 +1,11 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { indicatorsApi, institutionsApi } from '../../api';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import StatusBadge from '../../components/ui/StatusBadge';
 import ProgressBar from '../../components/ui/ProgressBar';
+import InsightPanel from '../../components/InsightPanel';
 import useAuthStore from '../../store/authStore';
 import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 
@@ -12,9 +13,11 @@ const FISCAL_YEAR = getCurrentFiscalYear();
 
 export default function IndicatorDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
   const qc = useQueryClient();
   const canSetTargets = ['super_admin', 'me_officer', 'admin'].includes(user?.role);
+  const canEdit = ['super_admin', 'me_officer'].includes(user?.role);
 
   const { data: indicator, isLoading } = useQuery({
     queryKey: ['indicator', id],
@@ -54,8 +57,32 @@ export default function IndicatorDetailPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="badge-blue font-mono">{indicator.code}</span>
-            <span className="badge-gray capitalize">{indicator.formulaType}</span>
+            <span className="badge-gray capitalize">{indicator.formulaType?.replace(/_/g, ' ')}</span>
             <span className="badge-gray capitalize">{indicator.reportingFrequency}</span>
+            {indicator.indicatorType && (
+              <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-700 capitalize">
+                {indicator.indicatorType.replace(/_indicator$/, '').replace(/_/g, ' ')}
+              </span>
+            )}
+            {indicator.progressDirection && (
+              <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                indicator.progressDirection === 'increasing' ? 'bg-green-100 text-green-700' :
+                indicator.progressDirection === 'decreasing' ? 'bg-red-100 text-red-700' :
+                                                                'bg-blue-100 text-blue-700'
+              }`}>
+                {indicator.progressDirection === 'increasing' ? '↑ Increasing' :
+                 indicator.progressDirection === 'decreasing' ? '↓ Decreasing' : '→ Stable'}
+              </span>
+            )}
+            {indicator.indicatorStatus && indicator.indicatorStatus !== 'active' && (
+              <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                indicator.indicatorStatus === 'retired'      ? 'bg-gray-100 text-gray-500' :
+                indicator.indicatorStatus === 'discontinued' ? 'bg-red-100 text-red-600' :
+                                                                'bg-yellow-100 text-yellow-700'
+              } capitalize`}>
+                {indicator.indicatorStatus.replace(/_/g, ' ')}
+              </span>
+            )}
           </div>
           <h1 className="text-2xl font-bold text-gray-900">{indicator.name}</h1>
           {indicator.ownerType && (
@@ -76,8 +103,24 @@ export default function IndicatorDetailPage() {
             </div>
           )}
           {chain && <p className="text-sm text-gray-400 mt-1">{chain}</p>}
+          {indicator.description && (
+            <p className="text-sm text-gray-600 mt-2 max-w-2xl">{indicator.description}</p>
+          )}
         </div>
-        <Link to="/data-entry/submit" className="btn-primary flex-shrink-0">Submit Data</Link>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {canEdit && (
+            <button
+              onClick={() => navigate(`/indicators/${id}/edit`)}
+              className="btn-secondary flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+              </svg>
+              Edit
+            </button>
+          )}
+          <Link to="/data-entry/submit" className="btn-primary">Submit Data</Link>
+        </div>
       </div>
 
       {/* Info cards */}
@@ -102,9 +145,18 @@ export default function IndicatorDetailPage() {
         </div>
       </div>
 
+      {/* ── Insight Panel (trend & anomaly summary for this indicator) ─── */}
+      <InsightPanel
+        indicatorId={id}
+        fiscalYear={FISCAL_YEAR}
+        title="What the trend says"
+        compact
+        limit={6}
+      />
+
       {/* Targets */}
       <div className="card">
-        <h2 className="text-base font-semibold mb-4">Targets - FY {FISCAL_YEAR}</h2>
+        <h2 className="text-base font-semibold mb-4">Targets · FY {FISCAL_YEAR}</h2>
         {targets.length > 0 ? (
           <table className="w-full text-sm mb-4">
             <thead>
@@ -158,6 +210,35 @@ export default function IndicatorDetailPage() {
           </form>
         )}
       </div>
+
+      {/* PIRS Documentation */}
+      {(indicator.collectionMethod || indicator.verificationSource || indicator.dataSource || indicator.responsiblePerson || indicator.minValue != null || indicator.maxValue != null) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide">PIRS Documentation</h3>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {indicator.dataSource && (
+              <div><span className="text-gray-400 text-xs">Data Source</span><p className="font-medium text-gray-800 mt-0.5">{indicator.dataSource}</p></div>
+            )}
+            {indicator.collectionMethod && (
+              <div><span className="text-gray-400 text-xs">Collection Method</span><p className="font-medium text-gray-800 mt-0.5">{indicator.collectionMethod}</p></div>
+            )}
+            {indicator.verificationSource && (
+              <div className="col-span-2"><span className="text-gray-400 text-xs">Verification Source</span><p className="font-medium text-gray-800 mt-0.5">{indicator.verificationSource}</p></div>
+            )}
+            {indicator.responsiblePerson && (
+              <div><span className="text-gray-400 text-xs">Responsible Person</span><p className="font-medium text-gray-800 mt-0.5">{indicator.responsiblePerson}</p></div>
+            )}
+            {(indicator.minValue != null || indicator.maxValue != null) && (
+              <div>
+                <span className="text-gray-400 text-xs">Acceptable Range</span>
+                <p className="font-medium text-gray-800 mt-0.5">
+                  {indicator.minValue != null ? indicator.minValue.toLocaleString() : '—'} to {indicator.maxValue != null ? indicator.maxValue.toLocaleString() : '—'}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

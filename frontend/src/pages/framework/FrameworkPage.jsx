@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
@@ -95,43 +95,79 @@ function NodeRow({ label, name, depth = 0, children, onAdd, onEdit, responsibles
 }
 
 // ── ObjectiveTree ──────────────────────────────────────────────────────────────
-function ObjectiveTree({ objectives, canEdit, onAdd, onEdit, showResponsible = false }) {
+function ObjectiveTree({ objectives, canEdit, onAdd, onEdit, showResponsible = false, onReorder }) {
+  const dragIdx  = useRef(null);
+  const [dropIdx, setDropIdx] = useState(null);
+
   if (!objectives.length)
     return <p className="text-gray-400 text-center py-10 text-sm">No objectives assigned to this entity yet.</p>;
 
+  const handleDragStart = (e, idx) => {
+    dragIdx.current = idx;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleDragOver = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropIdx(idx);
+  };
+  const handleDrop = (e, idx) => {
+    e.preventDefault();
+    if (dragIdx.current !== null && dragIdx.current !== idx && onReorder) {
+      onReorder(dragIdx.current, idx);
+    }
+    dragIdx.current = null;
+    setDropIdx(null);
+  };
+  const handleDragEnd = () => { dragIdx.current = null; setDropIdx(null); };
+
   return (
     <div className="space-y-2">
-      {objectives.map(obj => (
-        <NodeRow key={obj.id} label="objective" name={obj.name} isRoot
-          responsibles={showResponsible ? (obj.responsibles || []) : []}
-          onEdit={canEdit ? () => onEdit('objective', obj) : null}
-          onAdd={canEdit ? () => onAdd('outcome', obj.id) : null}
+      {canEdit && (
+        <p className="text-[10px] text-gray-400 text-right pr-1 pb-0.5">
+          ↕ Drag objectives to reorder
+        </p>
+      )}
+      {objectives.map((obj, idx) => (
+        <div key={obj.id}
+          className={`transition-all ${dropIdx === idx && dragIdx.current !== idx ? 'ring-2 ring-blue-400 rounded-xl' : ''}`}
+          draggable={canEdit}
+          onDragStart={canEdit ? e => handleDragStart(e, idx) : undefined}
+          onDragOver={canEdit ? e => handleDragOver(e, idx) : undefined}
+          onDrop={canEdit ? e => handleDrop(e, idx) : undefined}
+          onDragEnd={canEdit ? handleDragEnd : undefined}
         >
-          {obj.outcomes?.map(oc => (
-            <NodeRow key={oc.id} label="outcome" name={oc.name} depth={1}
-              onEdit={canEdit ? () => onEdit('outcome', oc) : null}
-              onAdd={canEdit ? () => onAdd('output', oc.id) : null}
-            >
-              {oc.outputs?.map(op => (
-                <NodeRow key={op.id} label="output" name={op.name} depth={2}
-                  onEdit={canEdit ? () => onEdit('output', op) : null}
-                  onAdd={canEdit ? () => onAdd('activity', op.id) : null}
-                >
-                  {[
-                    ...(op.activities || []).map(act => (
-                      <NodeRow key={act.id} label="activity" name={act.name} depth={3}
-                        onEdit={canEdit ? () => onEdit('activity', act) : null}
-                      />
-                    )),
-                    ...(op.indicators || []).map(ind => (
-                      <NodeRow key={ind.id} label="indicator" name={`${ind.code} - ${ind.name}`} depth={3} />
-                    )),
-                  ]}
-                </NodeRow>
-              ))}
-            </NodeRow>
-          ))}
-        </NodeRow>
+          <NodeRow label="objective" name={obj.name} isRoot
+            responsibles={showResponsible ? (obj.responsibles || []) : []}
+            onEdit={canEdit ? () => onEdit('objective', obj) : null}
+            onAdd={canEdit ? () => onAdd('outcome', obj.id) : null}
+          >
+            {obj.outcomes?.map(oc => (
+              <NodeRow key={oc.id} label="outcome" name={oc.name} depth={1}
+                onEdit={canEdit ? () => onEdit('outcome', oc) : null}
+                onAdd={canEdit ? () => onAdd('output', oc.id) : null}
+              >
+                {oc.outputs?.map(op => (
+                  <NodeRow key={op.id} label="output" name={op.name} depth={2}
+                    onEdit={canEdit ? () => onEdit('output', op) : null}
+                    onAdd={canEdit ? () => onAdd('activity', op.id) : null}
+                  >
+                    {[
+                      ...(op.activities || []).map(act => (
+                        <NodeRow key={act.id} label="activity" name={act.name} depth={3}
+                          onEdit={canEdit ? () => onEdit('activity', act) : null}
+                        />
+                      )),
+                      ...(op.indicators || []).map(ind => (
+                        <NodeRow key={ind.id} label="indicator" name={`${ind.code}: ${ind.name}`} depth={3} />
+                      )),
+                    ]}
+                  </NodeRow>
+                ))}
+              </NodeRow>
+            ))}
+          </NodeRow>
+        </div>
       ))}
     </div>
   );
@@ -213,7 +249,7 @@ function MultiResponsibleSelector({ departments, value, onChange }) {
             )}
           </label>
 
-          {/* Unit rows — only show if dept is checked */}
+          {/* Unit rows: only show if dept is checked */}
           {isDeptAssigned(dept.id) && dept.units?.length > 0 && (
             <div className="bg-teal-50/40 border-t border-teal-100 pl-8">
               <p className="text-[10px] text-teal-600 font-semibold px-3 pt-1.5 pb-0.5 uppercase tracking-wide">Select specific units (optional)</p>
@@ -327,6 +363,31 @@ export default function FrameworkPage() {
 
   const isSaving = createMutation.isPending || editMutation.isPending;
 
+  // ── Drag-and-drop reorder handler ─────────────────────────────────────────
+  const [localObjectives, setLocalObjectives] = useState(null);
+  // When server data refreshes, drop the local optimistic copy
+  const prevObjRef = useRef(objectives);
+  if (objectives !== prevObjRef.current) { prevObjRef.current = objectives; setLocalObjectives(null); }
+  const displayObjectives = localObjectives || objectives;
+
+  const handleReorder = useCallback(async (fromIdx, toIdx) => {
+    const arr = [...displayObjectives];
+    const [moved] = arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, moved);
+    setLocalObjectives(arr);
+
+    // Persist new orderNo values to server (optimistic — fire and forget)
+    try {
+      await Promise.all(arr.map((obj, i) =>
+        frameworkApi.updateObjective(obj.id, { orderNo: i + 1 })
+      ));
+      qc.invalidateQueries(['framework']);
+    } catch {
+      toast.error('Reorder failed — please try again');
+      setLocalObjectives(null);
+    }
+  }, [displayObjectives, qc]);
+
   // ── Open handlers ──────────────────────────────────────────────────────────
   function openAdd(type, parentId) {
     let initResponsibles = [];
@@ -392,13 +453,13 @@ export default function FrameworkPage() {
   }, [responsibles, departments]);
 
   const contextLabel = useMemo(() => {
-    if (activeCtx === 'ministerial') return { icon: <FlagIcon className="w-5 h-5 text-mit-blue" />, title: 'Ministry of Industry and Trade - All National Objectives' };
+    if (activeCtx === 'ministerial') return { icon: <FlagIcon className="w-5 h-5 text-mit-blue" />, title: 'Ministry of Industry and Trade · All National Objectives' };
     if (activeDeptData) {
       const unit = activeDeptData.units?.find(u => u.id === activeUnit);
-      if (unit) return { icon: <UserGroupIcon className="w-5 h-5 text-teal-600" />, title: `${unit.name} (${unit.code}) - Unit Objectives` };
-      return { icon: <RectangleGroupIcon className="w-5 h-5 text-teal-600" />, title: `${activeDeptData.name} (${activeDeptData.code}) - Department Objectives` };
+      if (unit) return { icon: <UserGroupIcon className="w-5 h-5 text-teal-600" />, title: `${unit.name} (${unit.code}) · Unit Objectives` };
+      return { icon: <RectangleGroupIcon className="w-5 h-5 text-teal-600" />, title: `${activeDeptData.name} (${activeDeptData.code}) · Department Objectives` };
     }
-    if (activeInstData) return { icon: <BuildingOfficeIcon className="w-5 h-5 text-blue-600" />, title: `${activeInstData.name} - Institution Objectives` };
+    if (activeInstData) return { icon: <BuildingOfficeIcon className="w-5 h-5 text-blue-600" />, title: `${activeInstData.name} · Institution Objectives` };
     return { icon: null, title: '' };
   }, [activeCtx, activeDeptData, activeInstData, activeUnit]);
 
@@ -408,7 +469,7 @@ export default function FrameworkPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Results Framework</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Strategic Objectives - Outcomes - Outputs - Activities · Multiple departments/units per objective supported</p>
+          <p className="text-gray-500 text-sm mt-0.5">Strategic Objectives · Outcomes · Outputs · Activities · Multiple departments/units per objective supported</p>
         </div>
         <div className="flex items-center gap-2">
           <Link to="/framework/ministerial" className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold bg-teal-600 hover:bg-teal-700 text-white rounded-xl transition-colors">
@@ -509,11 +570,12 @@ export default function FrameworkPage() {
           </div>
         ) : (
           <ObjectiveTree
-            objectives={objectives}
+            objectives={displayObjectives}
             canEdit={canEdit}
             onAdd={openAdd}
             onEdit={openEdit}
             showResponsible={activeCtx === 'ministerial'}
+            onReorder={canEdit ? handleReorder : null}
           />
         )}
       </div>
@@ -536,7 +598,7 @@ export default function FrameworkPage() {
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
               </div>
 
-              {/* ── Multi-responsible assignment — OBJECTIVES only, not for ext. institutions ── */}
+              {/* ── Multi-responsible assignment: OBJECTIVES only, not for ext. institutions ── */}
               {modal.type === 'objective' && !activeInstId && (
                 <div className="border-2 border-teal-200 rounded-xl p-4 bg-teal-50/60 space-y-3">
                   <div className="flex items-center gap-2">
@@ -545,7 +607,7 @@ export default function FrameworkPage() {
                   </div>
                   <p className="text-xs text-teal-600 leading-relaxed">
                     Select all MIT departments and/or units responsible for implementing this objective.
-                    Multiple entities can share a single objective - each will see it in their tab.
+                    Multiple entities can share a single objective; each will see it in their tab.
                   </p>
 
                   <MultiResponsibleSelector
@@ -567,7 +629,7 @@ export default function FrameworkPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-gray-400 italic bg-white rounded-lg border border-gray-200 px-3 py-2">
-                      No assignment yet - this objective will be visible under Ministerial tab only.
+                      No assignment yet. This objective will be visible under Ministerial tab only.
                     </p>
                   )}
                 </div>

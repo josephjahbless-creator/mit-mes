@@ -59,7 +59,18 @@ async function indicatorReport(req, res) {
 // ── Institution report ─────────────────────────────────────────────────────────
 async function institutionReport(req, res) {
   const { fiscalYear = getCurrentFiscalYear(), period } = req.query;
-  const institutionId = req.params.id;
+  const requestedId = req.params.id;
+
+  // data_collector, admin, and viewer are scoped to their own institution;
+  // super_admin and me_officer can view any institution's report
+  const canViewAny = ['super_admin', 'me_officer'].includes(req.user.role);
+  const institutionId = canViewAny ? requestedId : req.user.institutionId;
+
+  // If a non-privileged user requests a different institution, silently scope to their own
+  // (avoids information leakage about whether the other institution ID exists)
+  if (!canViewAny && requestedId !== req.user.institutionId) {
+    return res.status(403).json({ error: 'You can only view your own institution\'s report' });
+  }
 
   const institution = await prisma.institution.findUnique({ where: { id: institutionId } });
   if (!institution) return res.status(404).json({ error: 'Not found' });
@@ -628,4 +639,173 @@ ${objectives.map(obj => `
   res.send(html);
 }
 
-module.exports = { indicatorReport, institutionReport, consolidatedReport, exportExcel, exportPdf };
+// ── Server-side PDF via Puppeteer ─────────────────────────────────────────────
+async function exportPdfServer(req, res) {
+  // Re-use the HTML from exportPdf, then render to actual PDF bytes via Puppeteer
+  let htmlContent = '';
+  const mockRes = {
+    setHeader: () => {},
+    send: (body) => { htmlContent = body; },
+  };
+
+  // Call the existing exportPdf logic to generate HTML
+  await exportPdf(req, mockRes);
+
+  if (!htmlContent) {
+    return res.status(500).json({ error: 'Failed to generate HTML for PDF' });
+  }
+
+  let browser;
+  try {
+    const puppeteer = require('puppeteer');
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+    });
+
+    const { fiscalYear = 'FY', period = 'Annual' } = req.body;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=MIT-MES-Report-${fiscalYear}-${period}.pdf`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.end(pdfBuffer);
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+// ── Word (.docx) export ────────────────────────────────────────────────────────
+async function exportDocx(req, res) {
+  const {
+    fiscalYear = getCurrentFiscalYear(),
+    period     = 'Annual',
+    ownerInstitutionId,
+    ownerDepartmentId,
+    ownerUnitId,
+    title      = 'Performance Report',
+  } = req.body;
+
+  const targetKey = PERIOD_TARGET_KEY[period] || 'annualTarget';
+
+  const indicatorWhere = { isActive: true };
+  if (ownerInstitutionId) indicatorWhere.ownerInstitutionId = ownerInstitutionId;
+  if (ownerDepartmentId)  indicatorWhere.ownerDepartmentId  = ownerDepartmentId;
+  if (ownerUnitId)        indicatorWhere.ownerUnitId        = ownerUnitId;
+
+  const indicators = await prisma.indicator.findMany({
+    where: indicatorWhere,
+    orderBy: { code: 'asc' },
+    include: {
+      output: { include: { outcome: { include: { objective: { select: { id: true, name: true, orderNo: true } } } } } },
+      ownerInstitution: { select: { name: true } },
+      ownerDepartment:  { select: { name: true } },
+      ownerUnit:        { select: { name: true } },
+    },
+  });
+
+  const ids = indicators.map(i => i.id);
+  const targetFilter  = { indicatorId: { in: ids }, fiscalYear };
+  const actualsFilter = { indicatorId: { in: ids }, fiscalYear, reportingPeriod: period, status: { in: ['submitted', 'approved'] } };
+  if (ownerInstitutionId) { targetFilter.institutionId = ownerInstitutionId; actualsFilter.institutionId = ownerInstitutionId; }
+
+  const [targets, actuals] = await Promise.all([
+    ids.length ? prisma.indicatorTarget.findMany({ where: targetFilter }) : [],
+    ids.length ? prisma.indicatorActual.findMany({ where: actualsFilter }) : [],
+  ]);
+
+  const tMap = {};
+  targets.forEach(t => { const v = t[targetKey]; if (v != null) tMap[t.indicatorId] = (tMap[t.indicatorId] || 0) + v; });
+  const aMap = {};
+  actuals.forEach(a => { if (a.actualValue != null) aMap[a.indicatorId] = (aMap[a.indicatorId] || 0) + a.actualValue; });
+
+  // Group by objective
+  const objMap = new Map();
+  for (const ind of indicators) {
+    const obj = ind.output?.outcome?.objective;
+    if (!obj) continue;
+    if (!objMap.has(obj.id)) objMap.set(obj.id, { ...obj, rows: [] });
+    const tVal = tMap[ind.id] ?? null;
+    const aVal = aMap[ind.id] ?? null;
+    const pct  = tVal && tVal > 0 && aVal != null ? `${Math.round((aVal / tVal) * 100)}%` : 'N/A';
+    const owner = ind.ownerUnit?.name || ind.ownerDepartment?.name || ind.ownerInstitution?.name || '—';
+    objMap.get(obj.id).rows.push({ code: ind.code, name: ind.name, unit: ind.unit || '—', owner, target: tVal ?? '—', actual: aVal ?? '—', pct });
+  }
+
+  // Build plain-text Word-compatible content using a simple XML approach
+  // We use docx-style XML embedded in an HTML that Word can open
+  const now = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+  const objectives = [...objMap.values()].sort((a, b) => (a.orderNo || 0) - (b.orderNo || 0));
+
+  let tableRows = '';
+  for (const obj of objectives) {
+    tableRows += `
+      <tr>
+        <td colspan="7" style="background:#1e3a5f;color:white;font-weight:bold;padding:6px 8px;font-size:12pt">
+          ${obj.name}
+        </td>
+      </tr>
+      <tr style="background:#f1f5f9;font-weight:bold;font-size:10pt">
+        <td style="padding:5px 8px">Code</td>
+        <td style="padding:5px 8px">Indicator</td>
+        <td style="padding:5px 8px">Unit</td>
+        <td style="padding:5px 8px">Owner</td>
+        <td style="padding:5px 8px;text-align:right">Target</td>
+        <td style="padding:5px 8px;text-align:right">Actual</td>
+        <td style="padding:5px 8px;text-align:center">Achievement</td>
+      </tr>
+      ${obj.rows.map(r => `
+      <tr style="font-size:10pt">
+        <td style="padding:4px 8px;font-family:monospace">${r.code}</td>
+        <td style="padding:4px 8px">${r.name}</td>
+        <td style="padding:4px 8px">${r.unit}</td>
+        <td style="padding:4px 8px">${r.owner}</td>
+        <td style="padding:4px 8px;text-align:right">${typeof r.target === 'number' ? r.target.toLocaleString() : r.target}</td>
+        <td style="padding:4px 8px;text-align:right;font-weight:bold">${typeof r.actual === 'number' ? r.actual.toLocaleString() : r.actual}</td>
+        <td style="padding:4px 8px;text-align:center;font-weight:bold;color:${r.pct === 'N/A' ? '#94a3b8' : parseInt(r.pct) >= 75 ? '#16a34a' : parseInt(r.pct) >= 50 ? '#d97706' : '#dc2626'}">${r.pct}</td>
+      </tr>`).join('')}
+    `;
+  }
+
+  // Word-compatible HTML (mhtml)
+  const wordHtml = `
+<html xmlns:o='urn:schemas-microsoft-com:office:office'
+      xmlns:w='urn:schemas-microsoft-com:office:word'
+      xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+  <meta charset="UTF-8"/>
+  <title>${title}</title>
+  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom></w:WordDocument></xml><![endif]-->
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; margin: 2cm; }
+    h1   { font-size: 18pt; color: #1d4ed8; }
+    h2   { font-size: 13pt; color: #1e3a5f; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    td, th { border: 1px solid #e2e8f0; }
+    p.meta { color: #64748b; font-size: 10pt; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>Ministry of Industry &amp; Trade — M&amp;E Performance Report</h1>
+  <p class="meta">${title} &nbsp;|&nbsp; Fiscal Year ${fiscalYear} &nbsp;|&nbsp; Period: ${period}</p>
+  <p class="meta">Generated: ${now} &nbsp;|&nbsp; CONFIDENTIAL</p>
+  <br/>
+  <table>
+    ${tableRows}
+  </table>
+  <p style="font-size:9pt;color:#94a3b8;margin-top:30px">Ministry of Industry and Trade, United Republic of Tanzania &nbsp;·&nbsp; MIT M&amp;E System</p>
+</body>
+</html>`;
+
+  res.setHeader('Content-Type', 'application/msword');
+  res.setHeader('Content-Disposition', `attachment; filename=MIT-MES-Report-${fiscalYear}-${period}.doc`);
+  res.send(wordHtml);
+}
+
+module.exports = { indicatorReport, institutionReport, consolidatedReport, exportExcel, exportPdf, exportPdfServer, exportDocx };

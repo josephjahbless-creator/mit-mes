@@ -5,7 +5,8 @@ import { useForm } from 'react-hook-form';
 import {
   PlusIcon, ChevronDownIcon,
   PencilSquareIcon, BuildingOfficeIcon, BuildingOffice2Icon,
-  UserGroupIcon, CheckCircleIcon, XMarkIcon, LockClosedIcon,
+  UserGroupIcon, CheckCircleIcon, XMarkIcon, LockClosedIcon, BookOpenIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { indicatorsApi, institutionsApi, dataEntryApi } from '../../api';
 import useAuthStore from '../../store/authStore';
@@ -15,6 +16,24 @@ import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 const FISCAL_YEAR = getCurrentFiscalYear();
 const PERIODS = ['Q1', 'Q2', 'Q3', 'Q4', 'Annual'];
 const P_KEY   = { Q1: 'q1Target', Q2: 'q2Target', Q3: 'q3Target', Q4: 'q4Target', Annual: 'annualTarget' };
+
+const TYPE_META = {
+  output_indicator:  { label: 'Output',  cls: 'bg-blue-100 text-blue-700' },
+  outcome_indicator: { label: 'Outcome', cls: 'bg-green-100 text-green-700' },
+  impact_indicator:  { label: 'Impact',  cls: 'bg-purple-100 text-purple-700' },
+  process_indicator: { label: 'Process', cls: 'bg-amber-100 text-amber-700' },
+};
+const DIR_META = {
+  increasing: { icon: '↑', cls: 'text-green-600' },
+  decreasing: { icon: '↓', cls: 'text-red-500' },
+  stable:     { icon: '→', cls: 'text-blue-500' },
+};
+const STATUS_META = {
+  active:        'bg-green-100 text-green-700',
+  discontinued:  'bg-red-100 text-red-600',
+  under_revision:'bg-yellow-100 text-yellow-700',
+  retired:       'bg-gray-100 text-gray-500',
+};
 
 const DEPT_ICON = {
   DAHRM:'🏛️', DID:'🏭', DPP:'📋', DTD:'🤝', DSME:'🏪', DTI:'🌐',
@@ -125,7 +144,7 @@ function TargetModal({ indicator, institution, existing, onClose, canEdit }) {
           {existing && (
             <p className="text-[10px] text-gray-400 flex items-center gap-1">
               <CheckCircleIcon className="w-3.5 h-3.5 text-green-500" />
-              Targets previously set - saving will overwrite existing values.
+              Targets previously set: saving will overwrite existing values.
             </p>
           )}
 
@@ -138,7 +157,7 @@ function TargetModal({ indicator, institution, existing, onClose, canEdit }) {
             ) : (
               <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-2.5">
                 <LockClosedIcon className="w-4 h-4 text-gray-400" />
-                <span className="text-xs text-gray-500">Read-only - contact admin to edit</span>
+                <span className="text-xs text-gray-500">Read only: contact admin to edit</span>
               </div>
             )}
             <button type="button" onClick={onClose}
@@ -156,13 +175,19 @@ function TargetModal({ indicator, institution, existing, onClose, canEdit }) {
 function IndicatorRow({ ind, targetsForEntity, entity, canEdit, onSetTarget }) {
   const existing = targetsForEntity?.find(t => t.indicatorId === ind.id);
   const hasTarget = existing && PERIODS.some(p => existing[P_KEY[p]] != null);
+  const typeMeta = ind.indicatorType ? TYPE_META[ind.indicatorType] : null;
+  const dirMeta  = ind.progressDirection ? DIR_META[ind.progressDirection] : null;
 
   return (
     <tr className="hover:bg-gray-50 border-b border-gray-50 last:border-0">
       <td className="px-4 py-3">
         <div>
           <p className="text-xs font-semibold text-gray-900 leading-tight">{ind.name}</p>
-          <span className="font-mono text-[10px] text-gray-400">{ind.code}</span>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <span className="font-mono text-[10px] text-gray-400">{ind.code}</span>
+            {typeMeta && <span className={`text-[10px] px-1.5 py-0 rounded font-bold ${typeMeta.cls}`}>{typeMeta.label}</span>}
+            {dirMeta  && <span className={`text-[10px] font-bold ${dirMeta.cls}`}>{dirMeta.icon}</span>}
+          </div>
         </div>
       </td>
       <td className="px-3 py-3 text-xs text-gray-500">{ind.unit}</td>
@@ -341,8 +366,11 @@ export default function IndicatorsPage() {
   const user   = useAuthStore(s => s.user);
   const canEdit = ['super_admin', 'me_officer', 'admin'].includes(user?.role);
 
-  const [tab,   setTab]  = useState('institutions');
-  const [modal, setModal] = useState(null);
+  const [tab,           setTab]         = useState('institutions');
+  const [modal,         setModal]        = useState(null);
+  const [libSearch,     setLibSearch]    = useState('');
+  const [libFilterType, setLibFilterType]= useState('');
+  const [libFilterStatus,setLibFilterStatus]=useState('');
 
   // ── Data fetching ────────────────────────────────────────────────────────
   const { data: indicators = [], isLoading: indLoading } = useQuery({
@@ -418,7 +446,7 @@ export default function IndicatorsPage() {
   }, [indicators]);
 
   // Units (FAU, PMU, LSU, etc.) are stored as departments in the DB and linked via
-  // departmentId in objectiveResponsibles — so their indicators appear in deptIndicators.
+  // departmentId in objectiveResponsibles: so their indicators appear in deptIndicators.
   // The unitIndicators map is an alias: same source, same keys (department IDs).
   // The Units tab looks up unit.id which matches the department record's ID.
   const unitIndicators = deptIndicators;
@@ -429,10 +457,24 @@ export default function IndicatorsPage() {
   const totalSet = useMemo(() => new Set(allTargets.map(t => `${t.indicatorId}-${t.institutionId}`)).size, [allTargets]);
   const isLoading = indLoading || targetsLoading;
 
+  const libFiltered = useMemo(() => indicators.filter(ind => {
+    if (libSearch && !ind.name.toLowerCase().includes(libSearch.toLowerCase()) && !ind.code.toLowerCase().includes(libSearch.toLowerCase())) return false;
+    if (libFilterType   && ind.indicatorType   !== libFilterType)   return false;
+    if (libFilterStatus && ind.indicatorStatus !== libFilterStatus) return false;
+    return true;
+  }), [indicators, libSearch, libFilterType, libFilterStatus]);
+
+  const typeCountMap = useMemo(() => {
+    const m = {};
+    indicators.forEach(i => { if (i.indicatorType) m[i.indicatorType] = (m[i.indicatorType] || 0) + 1; });
+    return m;
+  }, [indicators]);
+
   const tabs = [
     { key: 'institutions', label: 'Institutions',    icon: BuildingOfficeIcon,  count: supervisedInstitutions.length },
     { key: 'departments',  label: 'MIT Departments', icon: BuildingOffice2Icon, count: mitDepartments.length },
     { key: 'units',        label: 'MIT Units',       icon: UserGroupIcon,       count: mitUnits.length },
+    { key: 'library',      label: 'Library',         icon: BookOpenIcon,        count: indicators.length },
   ];
 
   return (
@@ -454,6 +496,21 @@ export default function IndicatorsPage() {
             <PlusIcon className="w-4 h-4" /> New Indicator
           </Link>
         )}
+      </div>
+
+      {/* ── Stats bar ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Output',  key: 'output_indicator',  cls: 'text-blue-600',   bg: 'bg-blue-50'   },
+          { label: 'Outcome', key: 'outcome_indicator', cls: 'text-green-600',  bg: 'bg-green-50'  },
+          { label: 'Impact',  key: 'impact_indicator',  cls: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Process', key: 'process_indicator', cls: 'text-amber-600',  bg: 'bg-amber-50'  },
+        ].map(t => (
+          <div key={t.key} className={`rounded-xl border border-gray-200 p-3 ${t.bg} text-center`}>
+            <p className={`text-2xl font-bold ${t.cls}`}>{typeCountMap[t.key] || 0}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{t.label} Indicators</p>
+          </div>
+        ))}
       </div>
 
       {/* ── Tabs ──────────────────────────────────────────────────────── */}
@@ -529,6 +586,95 @@ export default function IndicatorsPage() {
                 );
               })}
               {mitDepartments.length === 0 && <div className="text-center py-12 text-gray-400">No departments found.</div>}
+            </div>
+          )}
+
+          {/* ── LIBRARY tab ─────────────────────────────────────────── */}
+          {tab === 'library' && (
+            <div className="space-y-4">
+              {/* Filters */}
+              <div className="flex flex-wrap gap-3 items-center bg-white border border-gray-200 rounded-xl p-3">
+                <div className="relative flex-1 min-w-48">
+                  <input value={libSearch} onChange={e => setLibSearch(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                    placeholder="Search name or code..." />
+                  <MagnifyingGlassIcon className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
+                </div>
+                <select value={libFilterType} onChange={e => setLibFilterType(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">All Types</option>
+                  <option value="output_indicator">Output</option>
+                  <option value="outcome_indicator">Outcome</option>
+                  <option value="impact_indicator">Impact</option>
+                  <option value="process_indicator">Process</option>
+                </select>
+                <select value={libFilterStatus} onChange={e => setLibFilterStatus(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="discontinued">Discontinued</option>
+                  <option value="under_revision">Under Revision</option>
+                  <option value="retired">Retired</option>
+                </select>
+                {(libSearch || libFilterType || libFilterStatus) && (
+                  <button onClick={() => { setLibSearch(''); setLibFilterType(''); setLibFilterStatus(''); }}
+                    className="text-sm text-blue-600 hover:underline">Clear</button>
+                )}
+                <span className="text-xs text-gray-400 ml-auto">{libFiltered.length} results</span>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-100">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {['Code', 'Indicator Name', 'Type', 'Dir', 'Status', 'Owner', 'Freq'].map(h => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {libFiltered.map(ind => {
+                        const tm = ind.indicatorType ? TYPE_META[ind.indicatorType] : null;
+                        const dm = ind.progressDirection ? DIR_META[ind.progressDirection] : null;
+                        const ownerName = ind.ownerInstitution?.code || ind.ownerDepartment?.code || ind.ownerUnit?.code;
+                        return (
+                          <tr key={ind.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <Link to={`/indicators/${ind.id}`} className="font-mono text-xs text-blue-600 hover:underline">{ind.code}</Link>
+                            </td>
+                            <td className="px-4 py-3 max-w-xs">
+                              <Link to={`/indicators/${ind.id}`} className="text-sm font-medium text-gray-800 hover:text-blue-600 line-clamp-2">{ind.name}</Link>
+                              {ind.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{ind.description}</p>}
+                            </td>
+                            <td className="px-4 py-3">
+                              {tm ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${tm.cls}`}>{tm.label}</span>
+                                   : <span className="text-gray-300 text-xs">—</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {dm ? <span className={`text-base font-bold ${dm.cls}`}>{dm.icon}</span>
+                                  : <span className="text-gray-300 text-xs">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold capitalize ${STATUS_META[ind.indicatorStatus] || 'bg-green-100 text-green-700'}`}>
+                                {(ind.indicatorStatus || 'active').replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              {ind.ownerType && <div><span className="text-gray-300">{ind.ownerType[0]}</span> {ownerName || '—'}</div>}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-400 capitalize">{ind.reportingFrequency}</td>
+                          </tr>
+                        );
+                      })}
+                      {libFiltered.length === 0 && (
+                        <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">No indicators match your filters</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 

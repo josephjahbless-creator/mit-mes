@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { dataEntryApi, commentsApi } from '../../api';
 import useAuthStore from '../../store/authStore';
+import InsightPanel from '../../components/InsightPanel';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -320,11 +321,19 @@ export default function SubmissionDetailPage() {
         )}
       </div>
 
+      {/* ── Automated Insight Panel (shown only for approved submissions) ── */}
+      {actual.status === 'approved' && (
+        <InsightPanel
+          actualId={actual.id}
+          title="Context for this submission"
+        />
+      )}
+
       {/* ── Workflow timeline card ── */}
       <div className="card">
         <h2 className="text-sm font-semibold text-gray-700 mb-5">Workflow Timeline</h2>
 
-        {/* Step 1 — Submission */}
+        {/* Step 1: Submission */}
         <WorkflowStep
           stepNumber={1}
           title="Data Submitted"
@@ -345,7 +354,7 @@ export default function SubmissionDetailPage() {
           }
         />
 
-        {/* Step 2 — Supervisor review */}
+        {/* Step 2: Supervisor review */}
         <WorkflowStep
           stepNumber={2}
           title={supervisedDone ? 'Supervisor Reviewed' : 'Awaiting Supervisor Review'}
@@ -375,7 +384,7 @@ export default function SubmissionDetailPage() {
           }
         />
 
-        {/* Step 3 — M&E approval */}
+        {/* Step 3: M&E approval */}
         <WorkflowStep
           stepNumber={3}
           title={
@@ -459,7 +468,7 @@ export default function SubmissionDetailPage() {
           />
 
           <div className="flex items-center justify-between flex-wrap gap-3">
-            {/* Internal note checkbox — M&E only */}
+            {/* Internal note checkbox: M&E only */}
             {canSeeInternal && (
               <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-600">
                 <input

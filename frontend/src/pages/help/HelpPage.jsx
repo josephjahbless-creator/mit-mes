@@ -302,7 +302,7 @@ export default function HelpPage() {
                   <p>
                     The <strong>MIT M&E System</strong> is used by the Ministry of Industry &amp; Trade (MIT) and its
                     13 affiliated institutions to monitor and evaluate performance against the MIT Strategic Plan
-                    2026/27–2030/31. It tracks indicators across all levels of the results chain — from
+                    2026/27–2030/31. It tracks indicators across all levels of the results chain: from
                     Strategic Objectives down to Activities.
                   </p>
 

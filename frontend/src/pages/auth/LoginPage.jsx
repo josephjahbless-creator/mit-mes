@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { EyeIcon, EyeSlashIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon, TicketIcon } from '@heroicons/react/24/outline';
-import { authApi, helpdeskApi } from '../../api';
+import { EyeIcon, EyeSlashIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon, TicketIcon, ShieldCheckIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
+import { authApi, helpdeskApi, twoFactorApi } from '../../api';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
 
@@ -171,7 +171,7 @@ function BackgroundSlideshow() {
 
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {/* Slides — render all, only current is visible */}
+      {/* Slides: render all, only current is visible */}
       {SLIDES.map((s, i) => (
         <div
           key={i}
@@ -307,37 +307,96 @@ function ForgotPasswordModal({ onClose }) {
 }
 
 function RequestAccountModal({ onClose }) {
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
-  function onSubmit(data) {
-    toast.success('Account request submitted. An administrator will contact you.');
-    onClose();
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+    defaultValues: { role: 'data_collector' },
+  });
+  const [submitted, setSubmitted] = useState(false);
+
+  async function onSubmit(data) {
+    try {
+      await authApi.requestAccount(data);
+      setSubmitted(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to submit request. Please try again.');
+    }
   }
+
+  if (submitted) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+          <div className="flex justify-center mb-4">
+            <CheckCircleIcon className="w-14 h-14 text-green-500" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Request Submitted!</h3>
+          <p className="text-sm text-gray-500 mb-6">
+            Your account request has been sent to the system administrators. You will be contacted once your request has been reviewed.
+          </p>
+          <button onClick={onClose} className="btn-primary w-full justify-center">Close</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-1">Request Account</h3>
-        <p className="text-sm text-gray-500 mb-4">Submit a request to the system administrator for access.</p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Request Account</h3>
+            <p className="text-xs text-gray-500 mt-0.5">An administrator will review and create your account.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </div>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div>
-            <label className="label">Full Name</label>
-            <input type="text" className="input" placeholder="Your full name" {...register('name', { required: true })} />
+            <label className="label">Full Name *</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="Your full name"
+              {...register('name', { required: 'Full name is required' })}
+            />
+            {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
           </div>
           <div>
-            <label className="label">Work Email</label>
-            <input type="email" className="input" placeholder="your.email@institution.go.tz" {...register('email', { required: true })} />
+            <label className="label">Work Email *</label>
+            <input
+              type="email"
+              className="input"
+              placeholder="your.email@institution.go.tz"
+              {...register('email', { required: 'Email is required' })}
+            />
+            {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
           </div>
           <div>
-            <label className="label">Institution</label>
-            <input type="text" className="input" placeholder="e.g. BRELA, SIDO, TBS..." {...register('institution', { required: true })} />
+            <label className="label">Institution / Department *</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="e.g. BRELA, SIDO, TBS, MIT-HQ..."
+              {...register('institution', { required: 'Institution is required' })}
+            />
+            {errors.institution && <p className="text-red-500 text-xs mt-1">{errors.institution.message}</p>}
           </div>
           <div>
-            <label className="label">Role Requested</label>
+            <label className="label">Role Requested *</label>
             <select className="input" {...register('role', { required: true })}>
-              <option value="">Select role...</option>
               <option value="data_collector">Data Collector</option>
-              <option value="viewer">Viewer</option>
+              <option value="viewer">Viewer (Read-only)</option>
               <option value="me_officer">M&amp;E Officer</option>
             </select>
+          </div>
+          <div>
+            <label className="label">Reason / Justification</label>
+            <textarea
+              className="input resize-none"
+              rows={2}
+              placeholder="Briefly explain why you need access..."
+              {...register('reason')}
+            />
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Cancel</button>
@@ -353,7 +412,7 @@ function RequestAccountModal({ onClose }) {
 
 // ── Quick FAQs shown in support modal ────────────────────────────────────────
 const QUICK_FAQS = [
-  { q: "I can't log in — what should I do?", a: "Check your email and password. If you've forgotten your password use 'Forgot password?' on the login form. If your account is locked after failed attempts, wait 5 minutes or contact your institution admin." },
+  { q: "I can't log in: what should I do?", a: "Check your email and password. If you've forgotten your password use 'Forgot password?' on the login form. If your account is locked after failed attempts, wait 5 minutes or contact your institution admin." },
   { q: "How do I request a new account?", a: "Click 'Request an account' on the login page and fill in your details. A system administrator will review your request and contact you." },
   { q: "Why can't I submit data for an indicator?", a: "The reporting period may be locked, you may not have the Data Collector role, or you may not be assigned to that indicator's institution. Contact your M&E Officer." },
   { q: "How is achievement % calculated?", a: "Achievement % = (Actual Value ÷ Target Value) × 100. The system calculates this automatically based on the indicator type." },
@@ -482,6 +541,64 @@ function SupportModal({ onClose }) {
   );
 }
 
+// ── 2FA Challenge Step ────────────────────────────────────────────────────────
+function TwoFAStep({ userId, onSuccess, onBack }) {
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const setAuth = useAuthStore(s => s.setAuth);
+  const navigate = useNavigate();
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (code.length !== 6) { toast.error('Enter the 6-digit code from your authenticator app'); return; }
+    setLoading(true);
+    try {
+      const { data } = await twoFactorApi.challenge({ userId, token: code });
+      setAuth(data.user, data.accessToken, data.refreshToken);
+      navigate('/dashboard');
+      toast.success(`Welcome, ${data.user.name}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Invalid verification code');
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+          <ShieldCheckIcon className="w-5 h-5 text-blue-600" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Two-Factor Authentication</h2>
+          <p className="text-xs text-gray-500">Enter the 6-digit code from your authenticator app</p>
+        </div>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="label">Verification Code</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            pattern="[0-9]*"
+            className="input text-center text-2xl tracking-widest font-mono"
+            placeholder="000000"
+            value={code}
+            onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            autoFocus
+          />
+        </div>
+        <button type="submit" className="btn-primary w-full justify-center" disabled={loading || code.length !== 6}>
+          {loading ? 'Verifying...' : 'Verify & Sign In'}
+        </button>
+        <button type="button" onClick={onBack} className="w-full text-center text-sm text-gray-500 hover:text-gray-700">
+          ← Back to login
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm();
   const setAuth = useAuthStore(s => s.setAuth);
@@ -490,10 +607,17 @@ export default function LoginPage() {
   const [showRegister, setShowRegister] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [twoFaStep, setTwoFaStep] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState(null);
 
   async function onSubmit({ email, password }) {
     try {
       const { data } = await authApi.login({ email, password });
+      if (data.requiresTwoFactor) {
+        setPendingUserId(data.userId);
+        setTwoFaStep(true);
+        return;
+      }
       setAuth(data.user, data.accessToken, data.refreshToken);
       navigate('/dashboard');
       toast.success(`Welcome, ${data.user.name}`);
@@ -541,6 +665,13 @@ export default function LoginPage() {
         <div className="rounded-2xl shadow-2xl overflow-hidden"
           style={{ background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(12px)' }}>
           <div className="p-8">
+            {twoFaStep ? (
+              <TwoFAStep
+                userId={pendingUserId}
+                onBack={() => { setTwoFaStep(false); setPendingUserId(null); }}
+              />
+            ) : (
+            <>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Sign in to your account</h2>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -607,6 +738,8 @@ export default function LoginPage() {
                 </button>
               </p>
             </div>
+            </>
+            )}
           </div>
         </div>
 

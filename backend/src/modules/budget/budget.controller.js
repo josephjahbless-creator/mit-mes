@@ -64,6 +64,19 @@ async function createPlan(req, res) {
 
 async function updatePlan(req, res) {
   const { q1Budget, q2Budget, q3Budget, q4Budget, fundingSource, currency } = req.body;
+
+  // admin role can only edit their own institution's plans
+  if (req.user.role === 'admin') {
+    const existing = await prisma.budgetPlan.findUnique({
+      where: { id: req.params.id },
+      select: { institutionId: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Budget plan not found' });
+    if (existing.institutionId !== req.user.institutionId) {
+      return res.status(403).json({ error: 'You can only edit your own institution\'s budget plans' });
+    }
+  }
+
   const total = (q1Budget || 0) + (q2Budget || 0) + (q3Budget || 0) + (q4Budget || 0);
   const plan = await prisma.budgetPlan.update({
     where: { id: req.params.id },
@@ -105,6 +118,17 @@ async function createExpenditure(req, res) {
 }
 
 async function approveExpenditure(req, res) {
+  // admin role scoped to own institution; super_admin/me_officer can approve any
+  if (req.user.role === 'admin') {
+    const existing = await prisma.expenditure.findUnique({
+      where: { id: req.params.id },
+      select: { institutionId: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Expenditure not found' });
+    if (existing.institutionId !== req.user.institutionId) {
+      return res.status(403).json({ error: 'You can only approve your own institution\'s expenditures' });
+    }
+  }
   const exp = await prisma.expenditure.update({
     where: { id: req.params.id },
     data: { status: 'approved', approvedById: req.user.id, approvedAt: new Date() },

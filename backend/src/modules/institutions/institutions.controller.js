@@ -3,8 +3,11 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../../config/db');
 
 async function list(req, res) {
+  // super_admin can see all institutions (including inactive) to enable reactivation;
+  // all other roles only see active ones so inactive institutions don't appear in dropdowns
+  const where = req.user.role === 'super_admin' ? {} : { isActive: true };
   const institutions = await prisma.institution.findMany({
-    where: { isActive: true },
+    where,
     select: { id: true, name: true, code: true, region: true, contactEmail: true, isActive: true },
     orderBy: { name: 'asc' },
   });
@@ -37,6 +40,10 @@ async function create(req, res) {
 }
 
 async function update(req, res) {
+  // admin role is scoped to their own institution only; super_admin can update any
+  if (req.user.role === 'admin' && req.user.institutionId !== req.params.id) {
+    return res.status(403).json({ error: 'You can only update your own institution' });
+  }
   const { name, region, contactEmail, isActive } = req.body;
   const institution = await prisma.institution.update({
     where: { id: req.params.id },

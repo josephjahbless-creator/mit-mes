@@ -95,7 +95,7 @@ function ProjectCard({ project }) {
         {/* Sustainability */}
         <div className={`flex items-center justify-between rounded-xl border px-3 py-2 ${sustain.color}`}>
           <span className="text-xs font-semibold">Sustainability</span>
-          <span className="text-xs font-bold">{metrics?.sustainScore ?? 0}% - {sustain.label}</span>
+          <span className="text-xs font-bold">{metrics?.sustainScore ?? 0}% · {sustain.label}</span>
         </div>
       </div>
 

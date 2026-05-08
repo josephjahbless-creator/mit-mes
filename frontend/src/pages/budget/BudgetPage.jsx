@@ -24,7 +24,7 @@ export default function BudgetPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Budget Planning</h1>
-          <p className="text-gray-500 text-sm">FY {FISCAL_YEAR} - Budget vs Expenditure</p>
+          <p className="text-gray-500 text-sm">FY {FISCAL_YEAR} · Budget vs Expenditure</p>
         </div>
         <a href="/budget/plan" className="btn-primary">+ New Budget Plan</a>
       </div>

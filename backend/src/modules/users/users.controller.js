@@ -1,6 +1,8 @@
 const bcrypt = require('bcryptjs');
 const { validationResult } = require('express-validator');
 const prisma = require('../../config/db');
+const { sendWelcomeEmail } = require('../../utils/mailer');
+const { generateMitEmail } = require('../../utils/mitEmail');
 
 const SELECT_USER = {
   id: true, name: true, email: true, role: true, isActive: true,
@@ -36,7 +38,7 @@ async function create(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, email, password, role, institutionId, departmentId, unitId } = req.body;
+  const { name, password, role, institutionId, departmentId, unitId, personalEmail } = req.body;
 
   // Prevent privilege escalation: only super_admin can create super_admin or me_officer
   const elevatedRoles = ['super_admin', 'me_officer'];
@@ -46,6 +48,9 @@ async function create(req, res) {
 
   // Admins can only create users in their own institution
   const targetInstitutionId = req.user.role === 'admin' ? req.user.institutionId : institutionId;
+
+  // Auto-generate MIT email from the user's name
+  const email = await generateMitEmail(name, prisma);
 
   try {
     const user = await prisma.user.create({
@@ -59,6 +64,11 @@ async function create(req, res) {
       },
       select: SELECT_USER,
     });
+
+    // Send credentials to personal/contact email if given, else to the MIT email
+    const sendTo = personalEmail?.trim() || email;
+    sendWelcomeEmail(sendTo, name, email, password).catch(() => {});
+
     res.status(201).json(user);
   } catch (e) {
     if (e.code === 'P2002') return res.status(409).json({ error: 'Email already exists' });
@@ -106,4 +116,25 @@ async function resetPassword(req, res) {
   res.json({ message: 'Password reset successfully' });
 }
 
-module.exports = { list, getOne, create, update, resetPassword };
+async function toggleActive(req, res) {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, isActive: true, role: true } });
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  // Prevent deactivating yourself
+  if (target.id === req.user.id) return res.status(400).json({ error: 'You cannot deactivate your own account' });
+  // Only super_admin can deactivate super_admin or me_officer
+  if (['super_admin', 'me_officer'].includes(target.role) && req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Only super_admin can deactivate privileged users' });
+  }
+  const user = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { isActive: !target.isActive },
+    select: SELECT_USER,
+  });
+  // Invalidate sessions if deactivating
+  if (!user.isActive) {
+    await prisma.refreshToken.deleteMany({ where: { userId: req.params.id } });
+  }
+  res.json(user);
+}
+
+module.exports = { list, getOne, create, update, resetPassword, toggleActive };

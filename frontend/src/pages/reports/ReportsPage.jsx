@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Cell, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { reportsApi, institutionsApi, dataEntryApi, dashboardApi } from '../../api';
+import { reportsApi, institutionsApi, dataEntryApi, dashboardApi, iatiApi } from '../../api';
 import {
   ArrowDownTrayIcon,
   BuildingOffice2Icon,
@@ -86,10 +86,10 @@ function IndicatorRow({ ind, showOwner }) {
       </div>
 
       {/* Name + owner */}
-      <div className="flex-1 min-w-0 pr-2">
+      <div className="flex-1 min-w-0 overflow-hidden pr-2">
         <p className="font-medium text-gray-800 leading-snug line-clamp-2">{ind.name}</p>
         {showOwner && ind.ownerName && (
-          <span className={`inline-block mt-0.5 text-[10px] px-1.5 rounded font-semibold ${
+          <span className={`inline-block max-w-full truncate mt-0.5 text-[10px] px-1.5 rounded font-semibold ${
             ind.ownerType === 'Institution' ? 'bg-blue-100 text-blue-600' :
             ind.ownerType === 'Department'  ? 'bg-teal-100 text-teal-600' :
                                               'bg-violet-100 text-violet-600'
@@ -377,15 +377,62 @@ export default function ReportsPage() {
   // ── Export ────────────────────────────────────────────────────────────────────
   async function handleExport() {
     try {
-      const body = { fiscalYear: FISCAL_YEAR, period };
-      if (selected.type !== 'all') { body.type = selected.type; body.id = selected.id; }
-      const res = await reportsApi.exportExcel(body);
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a   = document.createElement('a'); a.href = url;
+      const body = { ...buildExportBody(), type: selected.type, id: selected.id };
+      const res  = await reportsApi.exportExcel(body);
+      const url  = window.URL.createObjectURL(new Blob([res.data]));
+      const a    = document.createElement('a'); a.href = url;
       a.download = `MIT-MES-${FISCAL_YEAR}-${period}-${selected.label}.xlsx`;
       a.click();
-      toast.success('Report downloaded');
+      toast.success('Excel report downloaded');
     } catch { toast.error('Export failed'); }
+  }
+
+  async function handleExportPdf() {
+    try {
+      const body = buildExportBody();
+      // Browser-print HTML fallback
+      const res = await reportsApi.exportPdf(body);
+      const win = window.open('', '_blank');
+      win.document.write(res.data);
+      win.document.close();
+      toast.success('PDF opened — use browser Print to save');
+    } catch { toast.error('PDF export failed'); }
+  }
+
+  async function handleExportPdfServer() {
+    const tid = toast.loading('Generating PDF…');
+    try {
+      const body = buildExportBody();
+      const res  = await reportsApi.exportPdfServer(body);
+      const url  = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a    = document.createElement('a'); a.href = url;
+      a.download = `MIT-MES-${FISCAL_YEAR}-${period}-${selected.label}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('PDF downloaded', { id: tid });
+    } catch { toast.error('PDF generation failed', { id: tid }); }
+  }
+
+  async function handleExportDocx() {
+    const tid = toast.loading('Building Word document…');
+    try {
+      const body = buildExportBody();
+      const res  = await reportsApi.exportDocx(body);
+      const url  = window.URL.createObjectURL(new Blob([res.data], { type: 'application/msword' }));
+      const a    = document.createElement('a'); a.href = url;
+      a.download = `MIT-MES-${FISCAL_YEAR}-${period}-${selected.label}.doc`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Word document downloaded', { id: tid });
+    } catch { toast.error('Word export failed', { id: tid }); }
+  }
+
+  function buildExportBody() {
+    const body = { fiscalYear: FISCAL_YEAR, period, title: `${selected.label} — ${period} FY ${FISCAL_YEAR}` };
+    if (selected.type === 'institution') body.ownerInstitutionId = selected.id;
+    if (selected.type === 'department')  body.ownerDepartmentId  = selected.id;
+    if (selected.type === 'unit')        body.ownerUnitId        = selected.id;
+    return body;
   }
 
   const filteredInstitutions = institutions.filter(i => !EXCLUDED.includes(i.code));
@@ -517,8 +564,32 @@ export default function ReportsPage() {
               <ArrowPathIcon className="w-3.5 h-3.5" />
             </button>
 
-            <button onClick={handleExport} className="btn-primary text-xs py-1.5">
-              <ArrowDownTrayIcon className="w-3.5 h-3.5" /> Export
+            <button onClick={handleExport} className="btn-primary text-xs py-1.5" title="Export to Excel">
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" /> Excel
+            </button>
+
+            <button onClick={handleExportPdfServer} className="text-xs py-1.5 px-3 flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors" title="Download PDF file (server-rendered)">
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" /> PDF
+            </button>
+
+            <button onClick={handleExportDocx} className="text-xs py-1.5 px-3 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors" title="Download Word document">
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" /> Word
+            </button>
+
+            <button
+              onClick={async () => {
+                try {
+                  const res = await iatiApi.downloadActivities();
+                  const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/xml' }));
+                  const a = document.createElement('a'); a.href = url; a.download = 'iati-activities.xml'; a.click();
+                  window.URL.revokeObjectURL(url);
+                  toast.success('IATI Activities downloaded');
+                } catch { toast.error('IATI export failed'); }
+              }}
+              className="text-xs py-1.5 px-3 flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors"
+              title="Export IATI Activities XML"
+            >
+              <ArrowDownTrayIcon className="w-3.5 h-3.5" /> IATI
             </button>
           </div>
         </div>
@@ -537,7 +608,7 @@ export default function ReportsPage() {
               {/* ── Summary stat cards ── */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
 
-                {/* Overall performance — 2 cols */}
+                {/* Overall performance: 2 cols */}
                 <div className={`card col-span-2 sm:col-span-2 p-4 border-0 ${overallC.bg} flex items-center gap-4`}>
                   <div className="flex-1 min-w-0">
                     <p className={`text-[10px] font-bold uppercase tracking-wider ${overallC.text} opacity-80`}>

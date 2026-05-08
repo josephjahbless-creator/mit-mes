@@ -19,9 +19,20 @@ const ROLE_COLORS  = {
 const MIT_HQ_CODES = ['MIT-HQ'];
 
 const EMPTY_FORM = {
-  name: '', email: '', password: '', role: 'data_collector',
+  name: '', personalEmail: '', password: '', role: 'data_collector',
   institutionId: '', departmentId: '', unitId: '',
 };
+
+// Mirror of the backend nameToMitEmail utility
+function nameToMitEmail(name) {
+  const parts = name.trim()
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts.length ? parts.join('.') + '@mit.go.tz' : '';
+}
 
 export default function UsersPage() {
   const user    = useAuthStore(s => s.user);
@@ -89,8 +100,9 @@ export default function UsersPage() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, isActive }) => usersApi.update(id, { isActive }),
+    mutationFn: (id) => usersApi.toggleActive(id),
     onSuccess: () => { qc.invalidateQueries(['users']); toast.success('Status updated'); },
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed to update status'),
   });
 
   const resetPwMutation = useMutation({
@@ -109,7 +121,7 @@ export default function UsersPage() {
   function openEdit(u) {
     setForm({
       name:          u.name,
-      email:         u.email,
+      personalEmail: '',
       password:      '',
       role:          u.role,
       institutionId: u.institution?.id  || '',
@@ -136,14 +148,17 @@ export default function UsersPage() {
   function handleSave() {
     const payload = {
       name:          form.name,
-      email:         form.email,
       role:          form.role,
       institutionId: form.institutionId || null,
       departmentId:  form.departmentId  || null,
       unitId:        form.unitId        || null,
     };
     if (modal === 'create') {
-      createMutation.mutate({ ...payload, password: form.password });
+      createMutation.mutate({
+        ...payload,
+        password:      form.password,
+        personalEmail: form.personalEmail || undefined,
+      });
     } else {
       updateMutation.mutate({ id: editId, data: payload });
     }
@@ -235,7 +250,7 @@ export default function UsersPage() {
                         </button>
                         {u.id !== user?.id && (
                           <button
-                            onClick={() => toggleMutation.mutate({ id: u.id, isActive: !u.isActive })}
+                            onClick={() => toggleMutation.mutate(u.id)}
                             className={`text-xs font-medium ${u.isActive ? 'text-red-400 hover:text-red-600' : 'text-green-500 hover:text-green-700'}`}
                           >
                             {u.isActive ? 'Deactivate' : 'Activate'}
@@ -267,16 +282,35 @@ export default function UsersPage() {
                 <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
 
-              {/* Email */}
+              {/* Auto-generated MIT email preview */}
               <div>
-                <label className="label">Email *</label>
-                <input type="email" className="input" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                <label className="label">System Login Email (auto-generated)</label>
+                <div className="input bg-gray-50 text-gray-700 flex items-center gap-2 select-all cursor-default">
+                  <span className="text-blue-700 font-medium">
+                    {nameToMitEmail(form.name) || <span className="text-gray-400 font-normal">Enter full name above…</span>}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Generated from the full name — this is what the user signs in with.</p>
               </div>
+
+              {/* Personal / contact email (optional, for sending credentials) */}
+              {modal === 'create' && (
+                <div>
+                  <label className="label">Personal Email <span className="text-gray-400 font-normal">(optional — to receive credentials)</span></label>
+                  <input
+                    type="email" className="input"
+                    placeholder="e.g. joseph@gmail.com"
+                    value={form.personalEmail}
+                    onChange={e => setForm(f => ({ ...f, personalEmail: e.target.value }))}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">If provided, the welcome email with login details is sent here.</p>
+                </div>
+              )}
 
               {/* Password (only on create) */}
               {modal === 'create' && (
                 <div>
-                  <label className="label">Password *</label>
+                  <label className="label">Temporary Password *</label>
                   <input type="password" className="input" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
                   <p className="text-xs text-gray-400 mt-1">Min 8 chars, 1 uppercase, 1 number, 1 special character</p>
                 </div>
@@ -300,7 +334,7 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              {/* Department — only show when MIT-HQ is selected */}
+              {/* Department: only show when MIT-HQ is selected */}
               {isMitHQ && (
                 <div>
                   <label className="label">Department / Unit</label>
@@ -312,7 +346,7 @@ export default function UsersPage() {
                 </div>
               )}
 
-              {/* Sub-unit — only show when department has units */}
+              {/* Sub-unit: only show when department has units */}
               {isMitHQ && form.departmentId && deptUnits.length > 0 && (
                 <div>
                   <label className="label">Sub-Unit (optional)</label>
@@ -326,7 +360,7 @@ export default function UsersPage() {
 
               {/* Buttons */}
               <div className="flex gap-3 pt-2">
-                <button onClick={handleSave} className="btn-primary" disabled={isSubmitting || !form.name || !form.email}>
+                <button onClick={handleSave} className="btn-primary" disabled={isSubmitting || !form.name || (modal === 'create' && !form.password)}>
                   {isSubmitting ? 'Saving…' : (modal === 'create' ? 'Create User' : 'Save Changes')}
                 </button>
                 <button onClick={closeModal} className="btn-secondary">Cancel</button>

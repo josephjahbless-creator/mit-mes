@@ -21,6 +21,14 @@ const meReview = (id, data) =>
   api.patch(`/data-entry/actuals/${id}/me-review`, data);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function isOutlier(value, minValue, maxValue) {
+  const v = parseFloat(value);
+  if (isNaN(v)) return false;
+  if (minValue != null && v < minValue) return true;
+  if (maxValue != null && v > maxValue) return true;
+  return false;
+}
+
 const FISCAL_YEARS = ['2023/2024', '2024/2025', '2025/2026'];
 const PERIODS = ['Q1', 'Q2', 'Q3', 'Q4', 'Annual'];
 
@@ -199,7 +207,7 @@ export default function ApprovalQueuePage() {
         <h1 className="text-2xl font-bold text-gray-900">Approval Queue</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Review and action data submissions
-          {isMEOfficer ? ' — M&E final review' : ' — Supervisor review'}
+          {isMEOfficer ? ': M&E final review' : ': Supervisor review'}
         </p>
       </div>
 
@@ -271,7 +279,7 @@ export default function ApprovalQueuePage() {
                 onChange={(e) => setInstitutionId(e.target.value)}
               >
                 <option value="">All institutions</option>
-                {institutions.map((inst) => (
+                {institutions.filter(i => !['MIT', 'MIT-HQ'].includes(i.code)).map((inst) => (
                   <option key={inst.id ?? inst._id} value={inst.id ?? inst._id}>
                     {inst.name}
                   </option>
@@ -410,8 +418,24 @@ function SubmissionsTable({
                     {row.period} {row.fiscalYear ? `(${row.fiscalYear})` : ''}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-900 font-medium whitespace-nowrap">
-                    {row.value ?? row.actualValue ?? '—'}
-                    {row.unit ? ` ${row.unit}` : ''}
+                    {(() => {
+                      const val = row.value ?? row.actualValue;
+                      const min = row.indicator?.minValue ?? row.minValue;
+                      const max = row.indicator?.maxValue ?? row.maxValue;
+                      const outlier = val != null && isOutlier(val, min, max);
+                      return (
+                        <div>
+                          <span className={`font-mono text-sm ${outlier ? 'text-orange-600 font-bold' : ''}`}>{val ?? '—'}</span>
+                          {row.unit && !outlier && <span> {row.unit}</span>}
+                          {outlier && (
+                            <span className="ml-1 inline-block px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-bold rounded">
+                              ⚠ Outlier
+                            </span>
+                          )}
+                          {row.unit && outlier && <span className="ml-1 text-xs text-gray-500">{row.unit}</span>}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
                     {submittedBy}

@@ -5,8 +5,9 @@ import {
   KeyIcon, ArrowPathIcon, ClipboardDocumentIcon, TrashIcon,
   CheckCircleIcon, XCircleIcon, ClockIcon, PlusIcon,
   ArrowsRightLeftIcon, DocumentTextIcon, SignalIcon,
+  ChatBubbleLeftRightIcon, PaperAirplaneIcon,
 } from '@heroicons/react/24/outline';
-import { integrationsApi, institutionsApi } from '../../api';
+import { integrationsApi, institutionsApi, smsApi } from '../../api';
 import useAuthStore from '../../store/authStore';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ function GenerateKeyModal({ onClose, onSuccess }) {
         {newKey ? (
           <div className="p-6 space-y-4">
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-amber-800 mb-1">Save this key — it will not be shown again</p>
+              <p className="text-xs font-semibold text-amber-800 mb-1">Save this key: it will not be shown again</p>
               <p className="text-xs text-amber-700">Copy and store it securely before closing this dialog.</p>
             </div>
             <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-2">
@@ -403,7 +404,7 @@ function SyncLogsTab() {
             ))}
           </select>
         )}
-        <span className="text-xs text-gray-500 ml-auto">Auto-refreshes every 30s</span>
+        <span className="text-xs text-gray-500 ml-auto">Auto refreshes every 30s</span>
       </div>
 
       {isLoading ? (
@@ -583,7 +584,7 @@ function ApiDocsTab() {
       </div>
 
       <DocBlock title="Submit Indicator Progress Data">
-        <p className="text-xs text-gray-600 mb-2">Submit a progress value for an indicator. Upserts — subsequent calls for the same indicator/period overwrite the previous value.</p>
+        <p className="text-xs text-gray-600 mb-2">Submit a progress value for an indicator. Upserts: subsequent calls for the same indicator/period overwrite the previous value.</p>
         <CodeBlock code={SUBMIT_ACTUAL_EXAMPLE} />
         <p className="text-xs text-gray-500 mt-2 mb-1 font-medium">Response (201 Created):</p>
         <CodeBlock code={SUBMIT_ACTUAL_RESPONSE} />
@@ -610,10 +611,119 @@ function ApiDocsTab() {
         <p className="font-semibold mb-1">Security Notes</p>
         <ul className="list-disc list-inside space-y-1">
           <li>API keys are hashed server-side and cannot be recovered after creation.</li>
-          <li>Each key is scoped to a single institution — it cannot submit data for other institutions.</li>
+          <li>Each key is scoped to a single institution: it cannot submit data for other institutions.</li>
           <li>Revoke unused keys promptly. Set an expiry for time-limited integrations.</li>
           <li>Use HTTPS at all times. Never embed keys in client-side code or public repos.</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ── Tab: SMS ──────────────────────────────────────────────────────────────────
+
+function SmsTab() {
+  const [to, setTo]     = useState('');
+  const [msg, setMsg]   = useState('');
+  const [sending, setSending] = useState(false);
+
+  const { data: cfg }  = useQuery({ queryKey: ['sms-config'], queryFn: () => smsApi.config().then(r => r.data) });
+  const { data: logData, refetch } = useQuery({
+    queryKey: ['sms-logs'],
+    queryFn: () => smsApi.logs({ limit: 50 }).then(r => r.data),
+  });
+  const logs = logData?.logs ?? [];
+
+  async function handleSend(e) {
+    e.preventDefault();
+    if (!to || !msg) return;
+    setSending(true);
+    try {
+      await smsApi.send({ to, message: msg });
+      toast.success('SMS sent');
+      setTo(''); setMsg('');
+      refetch();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to send SMS');
+    } finally { setSending(false); }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Config status */}
+      <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm ${cfg?.configured ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+        {cfg?.configured
+          ? <><CheckCircleIcon className="w-4 h-4 shrink-0" /> Africa's Talking configured — username: <strong>{cfg.username}</strong></>
+          : <><XCircleIcon className="w-4 h-4 shrink-0" /> SMS not configured. Set <code className="font-mono text-xs bg-amber-100 px-1 rounded">AT_API_KEY</code> and <code className="font-mono text-xs bg-amber-100 px-1 rounded">AT_USERNAME</code> env vars.</>
+        }
+      </div>
+
+      {/* Send form */}
+      <div className="card">
+        <h3 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+          <PaperAirplaneIcon className="w-4 h-4 text-blue-600" /> Send SMS
+        </h3>
+        <form onSubmit={handleSend} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Recipient (phone with country code)</label>
+            <input value={to} onChange={e => setTo(e.target.value)}
+              placeholder="+255712345678"
+              className="input w-full max-w-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Message ({msg.length}/160)</label>
+            <textarea value={msg} onChange={e => setMsg(e.target.value)}
+              rows={3} maxLength={160}
+              placeholder="Enter message…"
+              className="input w-full max-w-lg resize-none"
+            />
+          </div>
+          <button type="submit" disabled={sending || !cfg?.configured}
+            className="btn-primary text-sm disabled:opacity-50">
+            {sending ? 'Sending…' : 'Send SMS'}
+          </button>
+        </form>
+      </div>
+
+      {/* Logs */}
+      <div className="card p-0 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <h3 className="text-sm font-semibold text-gray-800">SMS Logs</h3>
+          <button onClick={() => refetch()} className="text-xs text-blue-600 hover:underline">Refresh</button>
+        </div>
+        {logs.length === 0 ? (
+          <p className="text-center text-sm text-gray-400 py-10">No SMS sent yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left">Time</th>
+                  <th className="px-4 py-2 text-left">To</th>
+                  <th className="px-4 py-2 text-left">Message</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-left">Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {logs.map(l => (
+                  <tr key={l.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-xs text-gray-500 whitespace-nowrap">{formatDate(l.sentAt)}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-gray-700">{l.to}</td>
+                    <td className="px-4 py-2.5 text-xs text-gray-600 max-w-xs truncate">{l.message}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${l.status === 'sent' || l.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {l.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-gray-500">{l.cost ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -625,6 +735,7 @@ const TABS = [
   { key: 'status',  label: 'Sync Status',    icon: SignalIcon },
   { key: 'keys',    label: 'API Keys',        icon: KeyIcon },
   { key: 'logs',    label: 'Sync Logs',       icon: ArrowsRightLeftIcon },
+  { key: 'sms',     label: 'SMS',             icon: ChatBubbleLeftRightIcon },
   { key: 'docs',    label: 'API Docs',        icon: DocumentTextIcon },
 ];
 
@@ -664,6 +775,7 @@ export default function IntegrationsPage() {
         {tab === 'status' && <SyncStatusTab />}
         {tab === 'keys'   && <ApiKeysTab />}
         {tab === 'logs'   && <SyncLogsTab />}
+        {tab === 'sms'    && <SmsTab />}
         {tab === 'docs'   && <ApiDocsTab />}
       </div>
     </div>

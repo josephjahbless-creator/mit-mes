@@ -1,39 +1,73 @@
-require('dotenv').config();
-// Patch Express Router so async route handlers auto-forward errors to next()
-// Must come before express is used anywhere
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 require('express-async-errors');
-const express = require('express');
-const helmet  = require('helmet');
-const cors    = require('cors');
-const morgan  = require('morgan');
-const path    = require('path');
-const https   = require('https');
-const http    = require('http');
-const fs      = require('fs');
-const rateLimit = require('express-rate-limit');
+const express       = require('express');
+const helmet        = require('helmet');
+const cors          = require('cors');
+const morgan        = require('morgan');
+const path          = require('path');
+const https         = require('https');
+const http          = require('http');
+const fs            = require('fs');
+const rateLimit     = require('express-rate-limit');
+const swaggerUi     = require('swagger-ui-express');
+const swaggerSpec   = require('./config/swagger');
+const { initSocket } = require('./lib/socket');
 
 const app = express();
+
+// Trust the first proxy hop (localhost.run / any reverse proxy / tunnel)
+app.set('trust proxy', 1);
 
 // ── Security headers (hardened Helmet) ────────────────────────────────────────
 app.use(helmet({
   hsts:                    { maxAge: 31536000, includeSubDomains: true, preload: true },
-  contentSecurityPolicy:   false,   // SPA handles its own CSP; re-enable with full policy for API-only
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", "data:", "blob:"],
+      connectSrc:  ["'self'", "wss:", "ws:"],
+      fontSrc:     ["'self'", "data:"],
+      objectSrc:   ["'none'"],
+      frameSrc:    ["'none'"],
+      baseUri:     ["'self'"],
+      formAction:  ["'self'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
 }));
 
-// ── CORS — allow any LAN origin on port 5443 + localhost dev ─────────────────
+// ── CORS — explicit allowlist + LAN port access ───────────────────────────────
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '5443');
+const ALLOWED_ORIGINS = new Set([
+  'https://localhost:5173',
+  `https://localhost:${HTTPS_PORT}`,
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : []),
+]);
 app.use(cors({
   origin: (origin, cb) => {
-    // No origin = same-origin request or non-browser client — always allow
-    if (!origin) return cb(null, true);
-    // Allow localhost dev server on any port
-    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true);
-    // Allow any IP/hostname accessing on the HTTPS port (works on any network)
-    if (origin === `https://localhost:${HTTPS_PORT}`) return cb(null, true);
-    const url = new URL(origin);
-    if (url.protocol === 'https:' && parseInt(url.port) === HTTPS_PORT) return cb(null, true);
-    console.warn(`[CORS] Blocked origin: ${origin}`);
+    if (!origin) return cb(null, true);                   // same-origin / curl
+    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+    try {
+      const u = new URL(origin);
+      // Allow any HTTPS origin on the configured LAN port (internal network access)
+      if (u.protocol === 'https:' && parseInt(u.port) === HTTPS_PORT) return cb(null, true);
+      // Allow Cloudflare Tunnel domains (trycloudflare.com quick tunnels + named tunnels)
+      if (u.protocol === 'https:' && (
+        u.hostname.endsWith('.trycloudflare.com') ||
+        u.hostname.endsWith('.cfargotunnel.com') ||
+        u.hostname.endsWith('.cloudflareaccess.com')
+      )) return cb(null, true);
+      // Allow localhost.run tunnel domains
+      if (u.protocol === 'https:' && u.hostname.endsWith('.lhr.life')) return cb(null, true);
+      // Allow Serveo tunnel domains
+      if (u.protocol === 'https:' && (
+        u.hostname.endsWith('.serveo.net') ||
+        u.hostname.endsWith('.serveousercontent.com')
+      )) return cb(null, true);
+    } catch {}
+    console.warn(`[CORS] Blocked: ${origin}`);
     cb(null, false);
   },
   credentials: true,
@@ -41,6 +75,54 @@ app.use(cors({
 
 app.use(express.json({ limit: '2mb' }));  // tightened from 10mb
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ── Global audit logging (captures all authenticated mutating requests) ────────
+const prismaDb = require('./config/db');
+app.use((req, res, next) => {
+  if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next();
+  const originalJson = res.json.bind(res);
+  res.json = function(body) {
+    if (res.statusCode < 300 && req.user?.id) {
+      const pathParts  = req.path.replace(/^\/api\//, '').split('/');
+      const tableName  = pathParts[0] || 'unknown';
+      const actionMap  = { POST: 'CREATE', PATCH: 'UPDATE', PUT: 'UPDATE', DELETE: 'DELETE' };
+      const action     = actionMap[req.method] || req.method;
+      const recordId   = body?.id || body?.data?.id || req.params?.id || null;
+      prismaDb.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action,
+          tableName,
+          recordId: recordId ? String(recordId) : null,
+          changes: req.method !== 'DELETE' ? (req.body || null) : null,
+        },
+      }).catch(() => {});
+    }
+    return originalJson.call(this, body);
+  };
+  next();
+});
+
+// Track login activity for user activity log
+app.use((req, res, next) => {
+  if (req.method !== 'POST' || !req.path.includes('/auth/login')) return next();
+  const originalJson = res.json.bind(res);
+  res.json = function(body) {
+    if (res.statusCode === 200 && body?.user?.id) {
+      prismaDb.auditLog.create({
+        data: {
+          userId:    body.user.id,
+          action:    'LOGIN',
+          tableName: 'users',
+          recordId:  body.user.id,
+          changes:   { ip: req.ip, userAgent: req.headers['user-agent']?.substring(0, 200) },
+        },
+      }).catch(() => {});
+    }
+    return originalJson.call(this, body);
+  };
+  next();
+});
 
 // ── Global rate limiters ──────────────────────────────────────────────────────
 // General API limiter: 300 req / 15 min per IP
@@ -87,6 +169,24 @@ app.use('/api/framework-versions', require('./modules/framework-versions/framewo
 app.use('/api/departments',        require('./modules/departments/departments.routes'));
 app.use('/api/workplan',           require('./modules/workplan/workplan.routes'));
 app.use('/api/helpdesk',           require('./modules/helpdesk/helpdesk.routes'));
+app.use('/api/audit-logs',     require('./modules/audit/audit.routes'));
+app.use('/api/disaggregation', require('./modules/disaggregation/disaggregation.routes'));
+app.use('/api/toc',            require('./modules/theory-of-change/toc.routes'));
+// ── New feature modules ───────────────────────────────────────────────────────
+app.use('/api/sms',                   require('./modules/sms/sms.routes'));
+app.use('/api/email-reports',         require('./modules/email-reports/emailreports.routes'));
+app.use('/api/external-integrations', require('./modules/external-integrations/extintegrations.routes'));
+app.use('/api/mtef',                  require('./modules/mtef/mtef.routes'));
+app.use('/api/iati',                  require('./modules/iati/iati.routes'));
+app.use('/api/custom-forms',          require('./modules/custom-forms/customforms.routes'));
+app.use('/api/swot',                  require('./modules/swot/swot.routes'));
+app.use('/api/user-requests',         require('./modules/user-requests/userRequests.routes'));
+app.use('/api/webhooks',              require('./modules/webhooks/webhook.routes'));
+app.use('/api/push',                  require('./modules/push/push.routes'));
+app.use('/api/insights',              require('./modules/insights/insights.routes'));
+// Swagger API docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { customSiteTitle: 'MIT M&E API Docs' }));
+app.get('/api-spec.json', (req, res) => res.json(swaggerSpec));
 // Uploads — require authentication; only serve files to logged-in users
 const { authenticate } = require('./middleware/auth');
 app.use('/uploads', authenticate, express.static(path.join(__dirname, '../uploads')));
@@ -97,8 +197,22 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 // Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
   const frontendDist = path.join(__dirname, '../../frontend/dist');
-  app.use(express.static(frontendDist));
+  // Cache hashed assets forever; never cache index.html
+  app.use(express.static(frontendDist, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
+  }));
   app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 }
@@ -131,23 +245,34 @@ const PORT = parseInt(process.env.PORT || '5000');
 const certPath = path.join(__dirname, '../certs/cert.pem');
 const keyPath  = path.join(__dirname, '../certs/key.pem');
 
+// Start email report scheduler
+const { startScheduler } = require('./modules/email-reports/emailreports.scheduler');
+startScheduler();
+
+// Collect allowed origins for Socket.io CORS
+const corsOriginList = [...ALLOWED_ORIGINS];
+
+// HTTP server always serves the full app (used by localhost.run tunnel + reverse proxies)
+const { getIo } = require('./lib/socket');
+const httpServer = http.createServer(app);
+initSocket(httpServer, corsOriginList);
+httpServer.listen(PORT, () => {
+  console.log(`MIT M&E Backend (HTTP) running on port ${PORT}`);
+});
+
 if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
   const sslOptions = {
     cert: fs.readFileSync(certPath),
     key:  fs.readFileSync(keyPath),
   };
-  https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
-    console.log(`MIT M&E Backend (HTTPS) running on port ${HTTPS_PORT}`);
+  const httpsServer = https.createServer(sslOptions, app);
+
+  // Share the same Socket.io instance across both servers
+  getIo().attach(httpsServer);
+
+  httpsServer.listen(HTTPS_PORT, () => {
+    console.log(`MIT M&E Backend (HTTPS + WebSocket) running on port ${HTTPS_PORT}`);
   });
-  // HTTP → HTTPS redirect
-  http.createServer((req, res) => {
-    res.writeHead(301, { Location: `https://${req.headers.host.split(':')[0]}:${HTTPS_PORT}${req.url}` });
-    res.end();
-  }).listen(PORT, () => {
-    console.log(`HTTP redirect running on port ${PORT} → HTTPS ${HTTPS_PORT}`);
-  });
-} else {
-  app.listen(PORT, () => console.log(`MIT M&E Backend running on port ${PORT}`));
 }
 
 module.exports = app;

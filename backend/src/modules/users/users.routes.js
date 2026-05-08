@@ -19,5 +19,6 @@ router.post('/', authorize('super_admin', 'admin'), [
 
 router.patch('/:id', authorize('super_admin', 'admin'), controller.update);
 router.patch('/:id/reset-password', authorize('super_admin', 'admin'), controller.resetPassword);
+router.patch('/:id/toggle-active', authorize('super_admin', 'admin'), controller.toggleActive);
 
 module.exports = router;
