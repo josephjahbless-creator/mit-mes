@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
@@ -279,7 +279,11 @@ export default function FrameworkPage() {
   const qc      = useQueryClient();
   const canEdit = ['super_admin', 'me_officer'].includes(user?.role);
 
+  // Full-access: super_admin, admin, me_officer (from M&E unit) can see everything
+  const isFullAccess = ['super_admin', 'admin', 'me_officer'].includes(user?.role);
+
   const [searchParams, setSearchParams] = useSearchParams();
+  const [autoNavDone, setAutoNavDone]   = useState(false);
 
   const [activeCtx,  setActiveCtx]  = useState(searchParams.get('ctx')  || 'ministerial');
   const [activeUnit, setActiveUnit] = useState(searchParams.get('unit') || '');
@@ -308,6 +312,34 @@ export default function FrameworkPage() {
     queryKey: ['departments-list'],
     queryFn: () => dataEntryApi.listDepartments().then(r => r.data),
   });
+
+  // ── Auto-navigate restricted users to their assigned entity ──────────────
+  // Runs once after departments & institutions have loaded
+  useEffect(() => {
+    if (autoNavDone) return;
+    if (!user) return;
+    if (isFullAccess) { setAutoNavDone(true); return; }  // full-access users start at Ministerial
+
+    // Only auto-nav if user hasn't manually selected a tab yet (still on ministerial default)
+    if (activeCtx !== 'ministerial') { setAutoNavDone(true); return; }
+
+    if (user.unitId && user.departmentId && departments.length > 0) {
+      const dept = departments.find(d => d.id === user.departmentId);
+      if (dept) { switchCtx(`dept:${dept.id}`, user.unitId); }
+      setAutoNavDone(true);
+    } else if (user.departmentId && departments.length > 0) {
+      const dept = departments.find(d => d.id === user.departmentId);
+      if (dept) { switchCtx(`dept:${dept.id}`, ''); }
+      setAutoNavDone(true);
+    } else if (user.institutionId && institutions.length > 0) {
+      const inst = institutions.find(i => i.id === user.institutionId);
+      if (inst) { switchCtx(`inst:${inst.id}`); }
+      setAutoNavDone(true);
+    } else if (departments.length > 0 || institutions.length > 0) {
+      setAutoNavDone(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, departments, institutions, autoNavDone]);
 
   // ── Resolve active query params ────────────────────────────────────────────
   const queryParams = useMemo(() => {
@@ -486,59 +518,91 @@ export default function FrameworkPage() {
       {/* ── Main tab row ─────────────────────────────────────────────────── */}
       <div className="border-b border-gray-200">
         <div className="flex gap-0 flex-wrap overflow-x-auto">
-          <TabBtn active={activeCtx === 'ministerial'} onClick={() => switchCtx('ministerial')}>
-            <FlagIcon className="w-3.5 h-3.5" /> Ministerial
-          </TabBtn>
-
-          {departments.length > 0 && (
-            <span className="flex items-center px-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest self-center">MIT Depts</span>
-          )}
-
-          {departments.map(dept => (
-            <TabBtn key={dept.id}
-              active={activeCtx === `dept:${dept.id}`}
-              onClick={() => switchCtx(`dept:${dept.id}`, '')}
-            >
-              <RectangleGroupIcon className="w-3.5 h-3.5" />
-              {dept.code}
+          {/* Ministerial tab — full access only */}
+          {isFullAccess && (
+            <TabBtn active={activeCtx === 'ministerial'} onClick={() => switchCtx('ministerial')}>
+              <FlagIcon className="w-3.5 h-3.5" /> Ministerial
             </TabBtn>
-          ))}
-
-          {institutions.length > 0 && (
-            <span className="flex items-center px-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest self-center">Institutions</span>
           )}
 
-          {institutions.map(inst => {
-            const logo = LOGO_MAP[inst.code];
+          {/* Department tabs — full access sees all; restricted users see only their dept */}
+          {(() => {
+            const visibleDepts = isFullAccess
+              ? departments
+              : departments.filter(d => d.id === user?.departmentId);
+            if (!visibleDepts.length) return null;
             return (
-              <TabBtn key={inst.id}
-                active={activeCtx === `inst:${inst.id}`}
-                onClick={() => switchCtx(`inst:${inst.id}`)}
-              >
-                {logo
-                  ? <img src={logo} alt={inst.code} className="w-4 h-4 object-contain rounded" />
-                  : <BuildingOfficeIcon className="w-3.5 h-3.5" />}
-                {inst.code}
-              </TabBtn>
+              <>
+                {isFullAccess && (
+                  <span className="flex items-center px-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest self-center">MIT Depts</span>
+                )}
+                {visibleDepts.map(dept => (
+                  <TabBtn key={dept.id}
+                    active={activeCtx === `dept:${dept.id}`}
+                    onClick={() => switchCtx(`dept:${dept.id}`, '')}
+                  >
+                    <RectangleGroupIcon className="w-3.5 h-3.5" />
+                    {dept.code}
+                  </TabBtn>
+                ))}
+              </>
             );
-          })}
+          })()}
+
+          {/* Institution tabs — full access sees all; restricted users see only their institution */}
+          {(() => {
+            const visibleInsts = isFullAccess
+              ? institutions
+              : institutions.filter(i => i.id === user?.institutionId);
+            if (!visibleInsts.length) return null;
+            return (
+              <>
+                {isFullAccess && (
+                  <span className="flex items-center px-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest self-center">Institutions</span>
+                )}
+                {visibleInsts.map(inst => {
+                  const logo = LOGO_MAP[inst.code];
+                  return (
+                    <TabBtn key={inst.id}
+                      active={activeCtx === `inst:${inst.id}`}
+                      onClick={() => switchCtx(`inst:${inst.id}`)}
+                    >
+                      {logo
+                        ? <img src={logo} alt={inst.code} className="w-4 h-4 object-contain rounded" />
+                        : <BuildingOfficeIcon className="w-3.5 h-3.5" />}
+                      {inst.code}
+                    </TabBtn>
+                  );
+                })}
+              </>
+            );
+          })()}
         </div>
 
-        {activeDeptData?.units?.length > 0 && (
-          <div className="flex gap-0 flex-wrap overflow-x-auto bg-teal-50 border-t border-teal-100 px-2">
-            <TabBtn active={!activeUnit} onClick={() => switchCtx(`dept:${activeDeptData.id}`, '')}>
-              <RectangleGroupIcon className="w-3 h-3" /> All {activeDeptData.code}
-            </TabBtn>
-            {activeDeptData.units.map(unit => (
-              <TabBtn key={unit.id}
-                active={activeUnit === unit.id}
-                onClick={() => switchCtx(`dept:${activeDeptData.id}`, unit.id)}
-              >
-                <UserGroupIcon className="w-3 h-3" /> {unit.code}
-              </TabBtn>
-            ))}
-          </div>
-        )}
+        {activeDeptData?.units?.length > 0 && (() => {
+          // Restricted users see only their own unit (and the dept-wide view if they have no unit)
+          const visibleUnits = isFullAccess
+            ? activeDeptData.units
+            : activeDeptData.units.filter(u => !user?.unitId || u.id === user.unitId);
+          return (
+            <div className="flex gap-0 flex-wrap overflow-x-auto bg-teal-50 border-t border-teal-100 px-2">
+              {/* Show "All dept" tab only to full-access users or restricted users with no unit assigned */}
+              {(isFullAccess || !user?.unitId) && (
+                <TabBtn active={!activeUnit} onClick={() => switchCtx(`dept:${activeDeptData.id}`, '')}>
+                  <RectangleGroupIcon className="w-3 h-3" /> All {activeDeptData.code}
+                </TabBtn>
+              )}
+              {visibleUnits.map(unit => (
+                <TabBtn key={unit.id}
+                  active={activeUnit === unit.id}
+                  onClick={() => switchCtx(`dept:${activeDeptData.id}`, unit.id)}
+                >
+                  <UserGroupIcon className="w-3 h-3" /> {unit.code}
+                </TabBtn>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Context label */}

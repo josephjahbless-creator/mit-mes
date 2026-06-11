@@ -71,10 +71,14 @@ export const dataEntryApi = {
   reject: (id, data) => api.patch(`/data-entry/actuals/${id}/reject`, data),
   tracking: (params) => api.get('/data-entry/tracking', { params }),
   listDepartments: () => api.get('/data-entry/departments'),
-  uploadFiles: (formData) => api.post('/uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  previewImport: (formData) => api.post('/data-entry/import/preview', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  bulkImport: (formData) => api.post('/data-entry/import/bulk', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  uploadFiles: (formData) => api.post('/uploads', formData, { headers: { 'Content-Type': undefined } }),
+  previewImport: (formData) => api.post('/data-entry/import/preview', formData, { headers: { 'Content-Type': undefined } }),
+  bulkImport: (formData) => api.post('/data-entry/import/bulk', formData, { headers: { 'Content-Type': undefined } }),
   downloadTemplate: () => api.get('/data-entry/import/template', { responseType: 'blob' }),
+  // Result Framework import (creates framework + records period actuals)
+  frameworkTemplate: () => api.get('/data-entry/import/framework/template', { responseType: 'blob' }),
+  frameworkPreview: (formData) => api.post('/data-entry/import/framework/preview', formData, { headers: { 'Content-Type': undefined } }),
+  frameworkImport: (formData) => api.post('/data-entry/import/framework', formData, { headers: { 'Content-Type': undefined } }),
   completeness: (params) => api.get('/data-entry/completeness', { params }),
 };
 
@@ -156,7 +160,7 @@ export const notificationsApi = {
 export const documentsApi = {
   list:    (params)     => api.get('/documents', { params }),
   get:     (id)         => api.get(`/documents/${id}`),
-  upload:  (formData)   => api.post('/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  upload:  (formData)   => api.post('/documents', formData, { headers: { 'Content-Type': undefined } }),
   update:  (id, data)   => api.patch(`/documents/${id}`, data),
   remove:  (id)         => api.delete(`/documents/${id}`),
 };
@@ -257,6 +261,29 @@ export const twoFactorApi = {
   challenge: (data) => api.post('/auth/2fa/challenge', data),
 };
 
+// ── Dira ya Taifa 2050 Strategic Integration (mounted at /api/v1) ──────────────
+export const flagshipsApi = {
+  listObjectives:       (params) => api.get('/v1/strategic-objectives', { params }),
+  getObjective:         (id) => api.get(`/v1/strategic-objectives/${id}`),
+  getObjectiveProgress: (id, params) => api.get(`/v1/strategic-objectives/${id}/progress`, { params }),
+  dashboard:            () => api.get('/v1/dashboard/flagship-status'),
+  linkProject:          (id, data) => api.post(`/v1/strategic-objectives/${id}/link-project`, data),
+  unlinkProject:        (id, projectId) => api.delete(`/v1/strategic-objectives/${id}/link-project/${projectId}`),
+  projectFlagships:     (projectId) => api.get(`/v1/projects/${projectId}/flagships`),
+  listReforms:          (params) => api.get('/v1/foundational-reforms', { params }),
+  integrationStatus:    () => api.get('/v1/integration-status'),
+  recalculateIndicator: (id, data) => api.post(`/v1/indicators/${id}/recalculate`, data),
+  calculationTrace:     (id) => api.get(`/v1/indicators/${id}/calculation-trace`),
+  completeActivity:     (id, data) => api.post(`/v1/activities/${id}/complete`, data),
+  createMapping:        (data) => api.post('/v1/activity-indicator-mappings', data),
+  deleteMapping:        (id) => api.delete(`/v1/activity-indicator-mappings/${id}`),
+  listMappings:         (indicatorId) => api.get(`/v1/indicators/${indicatorId}/mappings`),
+  indicatorPerformance: (indicatorId) => api.get(`/v1/indicators/${indicatorId}/performance`),
+  activitiesLite:       (params) => api.get('/v1/activities-lite', { params }),
+  cascadeAnalysis:      (params) => api.get('/v1/reports/cascade-analysis', { params }),
+  dataQuality:          () => api.get('/v1/reports/data-quality'),
+};
+
 export const externalIntegrationsApi = {
   list:          ()              => api.get('/external-integrations'),
   get:           (system)        => api.get(`/external-integrations/${system}`),
@@ -307,6 +334,15 @@ export const iatiApi = {
 export const disaggregationApi = {
   list:       ()       => api.get('/disaggregation'),
   getOptions: (id)     => api.get(`/disaggregation/${id}/options`),
+};
+
+// ── Local AI (Ollama) analysis & insights ─────────────────────────────────────
+export const aiApi = {
+  status:        ()      => api.get('/ai/status'),
+  analyze:       (data)  => api.post('/ai/analyze', data),
+  chat:          (data)  => api.post('/ai/chat', data),
+  reportSummary: (data)  => api.post('/ai/report-summary', data),
+  explainAnomaly:(indicatorId, data) => api.post(`/ai/explain-anomaly/${indicatorId}`, data),
 };
 
 export const insightsApi = {

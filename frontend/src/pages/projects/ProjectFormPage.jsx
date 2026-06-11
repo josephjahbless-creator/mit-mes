@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { projectsApi, institutionsApi } from '../../api';
+import { projectsApi, institutionsApi, flagshipsApi } from '../../api';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
-import { ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, RocketLaunchIcon } from '@heroicons/react/24/outline';
 import { getCurrentFiscalYear } from '../../utils/fiscalYear';
 
 const STATUSES = ['planned', 'ongoing', 'completed', 'delayed', 'cancelled'];
@@ -25,9 +25,21 @@ export default function ProjectFormPage() {
   const [form, setForm] = useState(EMPTY);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // Strategic flagship alignment (set of strategic_objective ids)
+  const [selectedFlagships, setSelectedFlagships] = useState([]);
+  const toggleFlagship = (foId) =>
+    setSelectedFlagships(prev =>
+      prev.includes(foId) ? prev.filter(x => x !== foId) : [...prev, foId]
+    );
+
   const { data: institutions = [] } = useQuery({
     queryKey: ['institutions'],
     queryFn: () => institutionsApi.list().then(r => r.data),
+  });
+
+  const { data: flagships = [] } = useQuery({
+    queryKey: ['flagships-list'],
+    queryFn: () => flagshipsApi.listObjectives().then(r => r.data.data),
   });
 
   const { data: project } = useQuery({
@@ -35,6 +47,18 @@ export default function ProjectFormPage() {
     queryFn: () => projectsApi.get(id).then(r => r.data),
     enabled: isEdit,
   });
+
+  // Pre-load existing flagship links when editing
+  const { data: existingLinks = [] } = useQuery({
+    queryKey: ['project-flagships', id],
+    queryFn: () => flagshipsApi.projectFlagships(id).then(r => r.data.data),
+    enabled: isEdit,
+  });
+  useEffect(() => {
+    if (existingLinks.length) {
+      setSelectedFlagships(existingLinks.map(l => l.strategic_objective_id));
+    }
+  }, [existingLinks]);
 
   useEffect(() => {
     if (project) {
@@ -58,25 +82,43 @@ export default function ProjectFormPage() {
 
   const { mutateAsync, isPending } = useMutation({
     mutationFn: data => isEdit ? projectsApi.update(id, data) : projectsApi.create(data),
-    onSuccess: (res) => {
-      toast.success(isEdit ? 'Project updated' : 'Project created');
-      navigate(`/projects/${res.data.id}`);
-    },
     onError: () => toast.error('Failed to save project'),
   });
 
-  function handleSubmit(e) {
+  // Reconcile flagship links: link newly-selected, unlink removed.
+  async function syncFlagshipLinks(projectId) {
+    const previous = existingLinks.map(l => l.strategic_objective_id);
+    const toLink   = selectedFlagships.filter(x => !previous.includes(x));
+    const toUnlink = previous.filter(x => !selectedFlagships.includes(x));
+    const ops = [
+      ...toLink.map(foId => flagshipsApi.linkProject(foId, { projectId, contributionType: 'primary', weighting: 100 })),
+      ...toUnlink.map(foId => flagshipsApi.unlinkProject(foId, projectId)),
+    ];
+    if (ops.length) {
+      try { await Promise.allSettled(ops); } catch { /* non-fatal */ }
+    }
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('Project name is required'); return; }
-    mutateAsync({
-      ...form,
-      totalBudget:  form.totalBudget  ? parseFloat(form.totalBudget)  : 0,
-      institutionId: form.institutionId || null,
-      departmentId:  form.departmentId  || null,
-      unitId:        form.unitId        || null,
-      startDate:     form.startDate || null,
-      endDate:       form.endDate   || null,
-    });
+    try {
+      const res = await mutateAsync({
+        ...form,
+        totalBudget:  form.totalBudget  ? parseFloat(form.totalBudget)  : 0,
+        institutionId: form.institutionId || null,
+        departmentId:  form.departmentId  || null,
+        unitId:        form.unitId        || null,
+        startDate:     form.startDate || null,
+        endDate:       form.endDate   || null,
+      });
+      const projectId = res.data.id;
+      await syncFlagshipLinks(projectId);
+      toast.success(isEdit ? 'Project updated' : 'Project created');
+      navigate(`/projects/${projectId}`);
+    } catch {
+      // error toast already handled by mutation onError
+    }
   }
 
   const Field = ({ label, req, children }) => (
@@ -149,6 +191,36 @@ export default function ProjectFormPage() {
                 {institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
             </Field>
+          </div>
+        </div>
+
+        {/* Strategic Alignment — Dira ya Taifa 2050 flagships */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <RocketLaunchIcon className="w-4 h-4 text-blue-600" />
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Strategic Alignment (Dira 2050)</p>
+          </div>
+          <p className="text-xs text-gray-500 -mt-1">
+            Link this project to the strategic flagship(s) it contributes to. Project progress will roll up to the selected flagship dashboards automatically.
+          </p>
+          <div className="grid grid-cols-1 gap-2">
+            {flagships.map(fo => {
+              const checked = selectedFlagships.includes(fo.id);
+              return (
+                <label key={fo.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${checked ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleFlagship(fo.id)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-400" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-mono font-semibold text-blue-600">{fo.code}</span>
+                    <p className="text-sm text-gray-800 leading-snug">{fo.name}</p>
+                  </div>
+                </label>
+              );
+            })}
+            {flagships.length === 0 && (
+              <p className="text-sm text-gray-400 italic">No strategic flagships available.</p>
+            )}
           </div>
         </div>
 

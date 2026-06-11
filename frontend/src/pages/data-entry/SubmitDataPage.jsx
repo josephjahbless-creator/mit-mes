@@ -108,10 +108,10 @@ function EntityCard({ entity, type, selected, onClick }) {
   );
 }
 
-// ── Framework Tree ─────────────────────────────────────────────────────────────
-// Displays objectives → outputs → activities/indicators as an expandable tree.
-// User selects ONE activity and ONE indicator.
-function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectActivity, onSelectIndicator }) {
+// ── Framework Tree (Multi-Select) ─────────────────────────────────────────────
+// Checkboxes allow selecting multiple activities AND multiple indicators.
+// selectedActivities: Set<string>   selectedIndicators: Set<string>
+function FrameworkTree({ chain, selectedActivities, selectedIndicators, onToggleActivity, onToggleIndicator }) {
   const [openObjs, setOpenObjs]   = useState({});
   const [openOuts, setOpenOuts]   = useState({});
   const [indSearch, setIndSearch] = useState('');
@@ -139,23 +139,22 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
     );
   }
 
-  // Which output does the selected activity belong to?
-  const selActOutputId = useMemo(() => {
-    if (!selectedActivity) return null;
-    for (const obj of chain) {
-      for (const out of obj.outputs || []) {
-        if (out.activities?.some(a => a.id === selectedActivity)) return out.id;
-      }
-    }
-    return null;
-  }, [chain, selectedActivity]);
-
   return (
     <div className="space-y-3">
+      {/* Multi-select hint */}
+      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+        <InformationCircleIcon className="w-4 h-4 text-blue-500 shrink-0" />
+        <p className="text-xs text-blue-700">
+          <strong>Multi-select enabled</strong> — check any number of activities and indicators. All selected items will be submitted in one operation.
+        </p>
+      </div>
+
       {chain.map((obj, oi) => {
         const isObjOpen = !!openObjs[obj.id];
         const totalInds = obj.outputs?.reduce((s, op) => s + (op.indicators?.length || 0), 0) || 0;
         const totalActs = obj.outputs?.reduce((s, op) => s + (op.activities?.length || 0), 0) || 0;
+        const selActsInObj = obj.outputs?.reduce((s, op) => s + (op.activities?.filter(a => selectedActivities.has(a.id))?.length || 0), 0) || 0;
+        const selIndsInObj = obj.outputs?.reduce((s, op) => s + (op.indicators?.filter(i => selectedIndicators.has(i.id))?.length || 0), 0) || 0;
 
         return (
           <div key={obj.id} className="rounded-xl border border-gray-200 overflow-hidden shadow-sm">
@@ -172,6 +171,11 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
                 <p className="text-sm font-bold text-white leading-snug line-clamp-1">{obj.name}</p>
                 <p className="text-[11px] text-blue-200 mt-0.5">
                   {obj.outputs?.length || 0} performance targets · {totalActs} activities · {totalInds} indicators
+                  {(selActsInObj > 0 || selIndsInObj > 0) && (
+                    <span className="ml-2 text-emerald-300 font-bold">
+                      ✓ {selActsInObj} act · {selIndsInObj} ind selected
+                    </span>
+                  )}
                 </p>
               </div>
               {isObjOpen
@@ -184,7 +188,9 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
               <div className="divide-y divide-gray-100">
                 {(obj.outputs || []).map((out, outIdx) => {
                   const isOutOpen = !!openOuts[out.id];
-                  const hasSelection = selActOutputId === out.id || out.indicators?.some(i => i.id === selectedIndicator);
+                  const selActs = out.activities?.filter(a => selectedActivities.has(a.id)) || [];
+                  const selInds = out.indicators?.filter(i => selectedIndicators.has(i.id)) || [];
+                  const hasSelection = selActs.length > 0 || selInds.length > 0;
 
                   return (
                     <div key={out.id} className={hasSelection ? 'ring-1 ring-inset ring-emerald-300' : ''}>
@@ -208,6 +214,11 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          {hasSelection && (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">
+                              {selActs.length + selInds.length} selected
+                            </span>
+                          )}
                           <span className="text-[10px] bg-white border border-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full">
                             {out.activities?.length || 0} act · {out.indicators?.length || 0} ind
                           </span>
@@ -221,43 +232,45 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
                       {isOutOpen && (
                         <div className="px-4 pb-4 pt-3 bg-white grid grid-cols-1 md:grid-cols-2 gap-4">
 
-                          {/* Activities column */}
+                          {/* Activities column — checkboxes */}
                           <div>
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                               <Squares2X2Icon className="w-3 h-3" /> Planned Activities
+                              <span className="ml-1 text-emerald-600">{selActs.length > 0 ? `(${selActs.length} selected)` : ''}</span>
                             </p>
                             <div className="space-y-1.5">
                               {(out.activities || []).length === 0 && (
                                 <p className="text-xs text-gray-300 italic">No activities linked</p>
                               )}
-                              {(out.activities || []).map((act, ai) => {
-                                const sel = act.id === selectedActivity;
+                              {(out.activities || []).map((act) => {
+                                const sel = selectedActivities.has(act.id);
                                 return (
-                                  <button
+                                  <label
                                     key={act.id}
-                                    type="button"
-                                    onClick={() => onSelectActivity(sel ? '' : act.id)}
-                                    className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
+                                    className={`flex items-start gap-3 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
                                       sel
                                         ? 'border-emerald-400 bg-emerald-50 text-emerald-800 font-semibold shadow-sm'
                                         : 'border-gray-100 hover:border-blue-200 hover:bg-blue-50/40 text-gray-700'
                                     }`}
                                   >
-                                    <span className={`inline-block w-4 h-4 rounded-full text-[9px] font-bold mr-1.5 text-center leading-4 ${
-                                      sel ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-500'
-                                    }`}>{ai + 1}</span>
-                                    {act.name}
-                                    {sel && <CheckCircleIcon className="w-3.5 h-3.5 inline ml-1 text-emerald-500" />}
-                                  </button>
+                                    <input
+                                      type="checkbox"
+                                      checked={sel}
+                                      onChange={() => onToggleActivity(act.id)}
+                                      className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 shrink-0"
+                                    />
+                                    <span className="leading-snug">{act.name}</span>
+                                  </label>
                                 );
                               })}
                             </div>
                           </div>
 
-                          {/* Indicators column */}
+                          {/* Indicators column — checkboxes */}
                           <div>
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                               <CheckBadgeIcon className="w-3 h-3" /> Performance Indicators
+                              <span className="ml-1 text-violet-600">{selInds.length > 0 ? `(${selInds.length} selected)` : ''}</span>
                             </p>
                             {(out.indicators || []).length === 0 && (
                               <p className="text-xs text-gray-300 italic">No indicators linked</p>
@@ -279,32 +292,37 @@ function FrameworkTree({ chain, selectedActivity, selectedIndicator, onSelectAct
                               {(out.indicators || [])
                                 .filter(i => !indSearch || i.name.toLowerCase().includes(indSearch.toLowerCase()) || i.code.toLowerCase().includes(indSearch.toLowerCase()))
                                 .map(ind => {
-                                  const sel = ind.id === selectedIndicator;
+                                  const sel = selectedIndicators.has(ind.id);
                                   return (
-                                    <button
+                                    <label
                                       key={ind.id}
-                                      type="button"
-                                      onClick={() => onSelectIndicator(sel ? '' : ind.id)}
-                                      className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition-all ${
+                                      className={`flex items-start gap-3 rounded-lg border px-3 py-2 text-xs cursor-pointer transition-all ${
                                         sel
                                           ? 'border-violet-400 bg-violet-50 text-violet-800 font-semibold shadow-sm'
                                           : 'border-gray-100 hover:border-violet-200 hover:bg-violet-50/40 text-gray-700'
                                       }`}
                                     >
-                                      <div className="flex items-start gap-2">
-                                        <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded font-mono mt-0.5 ${
-                                          sel ? 'bg-violet-200 text-violet-800' : 'bg-gray-100 text-gray-500'
-                                        }`}>{ind.code}</span>
-                                        <span className="leading-snug">{ind.name}</span>
+                                      <input
+                                        type="checkbox"
+                                        checked={sel}
+                                        onChange={() => onToggleIndicator(ind.id)}
+                                        className="mt-0.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500 shrink-0"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                                            sel ? 'bg-violet-200 text-violet-800' : 'bg-gray-100 text-gray-500'
+                                          }`}>{ind.code}</span>
+                                          <span className="leading-snug truncate">{ind.name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-0.5 ml-0">
+                                          <span className="text-[10px] text-gray-400">{ind.unit}</span>
+                                          {ind.baselineValue != null && (
+                                            <span className="text-[10px] text-gray-400">· Baseline: {ind.baselineValue}</span>
+                                          )}
+                                        </div>
                                       </div>
-                                      <div className="flex items-center gap-2 mt-1 ml-8">
-                                        <span className="text-[10px] text-gray-400">{ind.unit}</span>
-                                        {ind.baselineValue != null && (
-                                          <span className="text-[10px] text-gray-400">· Baseline: {ind.baselineValue}</span>
-                                        )}
-                                        {sel && <CheckCircleIcon className="w-3.5 h-3.5 text-violet-500 ml-auto" />}
-                                      </div>
-                                    </button>
+                                    </label>
                                   );
                                 })
                               }
@@ -348,50 +366,89 @@ function ProgressMeter({ pct }) {
   );
 }
 
-// ── Confirm Modal ──────────────────────────────────────────────────────────────
-function ConfirmModal({ data, onConfirm, onCancel, isPending }) {
-  const rows = [
-    { label: 'Fiscal Year',          value: data.fiscalYear },
-    { label: 'Reporting Period',      value: data.period },
-    { label: 'Submission Date',       value: data.submissionDate ? new Date(data.submissionDate + 'T00:00:00').toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—' },
-    { label: 'Reporting Entity',      value: data.entityLabel,      truncate: true },
-    { label: 'Strategic Objective',   value: data.objectiveName,    truncate: true },
-    { label: 'Performance Target',    value: data.outputName,       truncate: true },
-    { label: 'Planned Activity',      value: data.activityName,     truncate: true },
-    { label: 'Performance Indicator', value: `${data.indicatorCode} – ${data.indicatorName}`, truncate: true },
-    { label: 'Progress Achieved',     value: `${data.actualValue?.toLocaleString()} ${data.unit}`, bold: true },
-    data.pct != null ? { label: 'Performance vs Target', value: `${data.pct}%`, bold: true } : null,
-    data.attachments?.length > 0 ? { label: 'Attachments', value: `${data.attachments.length} file(s)` } : null,
-  ].filter(Boolean);
-
+// ── Batch Confirm Modal ────────────────────────────────────────────────────────
+function BatchConfirmModal({ selIndicatorList, selActivityList, indicatorValues, entityLabel, period, submissionDate, attachments, onConfirm, onCancel, isPending }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5">
-          <h2 className="text-lg font-bold text-white">Confirm Submission</h2>
-          <p className="text-blue-100 text-sm mt-1">Review carefully: data is locked after submission</p>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 shrink-0">
+          <h2 className="text-lg font-bold text-white">Confirm Batch Submission</h2>
+          <p className="text-blue-100 text-sm mt-1">
+            {selIndicatorList.length} indicator{selIndicatorList.length !== 1 ? 's' : ''} · data is locked after submission
+          </p>
         </div>
-        <div className="p-6 space-y-4">
+
+        <div className="p-6 space-y-4 overflow-y-auto">
+          {/* Shared meta */}
           <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
-            {rows.map(row => (
+            {[
+              { label: 'Fiscal Year',     value: FISCAL_YEAR },
+              { label: 'Reporting Period', value: period },
+              { label: 'Submission Date', value: submissionDate ? new Date(submissionDate + 'T00:00:00').toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—' },
+              { label: 'Reporting Entity', value: entityLabel, truncate: true },
+              attachments?.length > 0 ? { label: 'Attachments', value: `${attachments.length} file(s)` } : null,
+            ].filter(Boolean).map(row => (
               <div key={row.label} className="flex items-center justify-between px-4 py-2.5 bg-white gap-4">
                 <span className="text-xs text-gray-500 shrink-0">{row.label}</span>
-                <span className={`text-xs text-right max-w-[240px] ${row.truncate ? 'truncate' : ''} ${row.bold ? 'font-bold text-blue-700' : 'text-gray-800 font-medium'}`}>
-                  {row.value || '—'}
-                </span>
+                <span className={`text-xs text-right max-w-[240px] font-medium text-gray-800 ${row.truncate ? 'truncate' : ''}`}>{row.value || '—'}</span>
               </div>
             ))}
           </div>
+
+          {/* Indicator list */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Indicators to Submit</p>
+            <div className="space-y-2">
+              {selIndicatorList.map(({ ind, out }, idx) => {
+                const entry = indicatorValues[ind.id] || {};
+                const isBin = ind.formulaType === 'binary';
+                const display = isBin
+                  ? (entry.binaryVal === true ? '✓ Achieved' : '✗ Not Achieved')
+                  : `${entry.value} ${ind.unit}`;
+                return (
+                  <div key={ind.id} className="flex items-start gap-3 bg-gray-50 rounded-xl px-4 py-3 border border-gray-100">
+                    <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-gray-800 leading-snug">{ind.code} — {ind.name}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{out.name}</p>
+                    </div>
+                    <span className="text-xs font-bold text-blue-700 shrink-0">{display}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Activities (if any selected) */}
+          {selActivityList.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Linked Activities</p>
+              <div className="space-y-1">
+                {selActivityList.map(({ act }) => (
+                  <div key={act.id} className="flex items-center gap-2 bg-emerald-50 rounded-lg px-3 py-2 border border-emerald-100">
+                    <CheckCircleIcon className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="text-xs text-emerald-800 font-medium">{act.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Warning */}
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
             <ShieldExclamationIcon className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-700 leading-relaxed">
-              Once submitted, this record will be <strong>locked for editing</strong> and forwarded to your M&amp;E officer for review and approval.
+              Once submitted, these records will be <strong>locked for editing</strong> and forwarded to your M&amp;E officer for review and approval.
             </p>
           </div>
+
+          {/* Buttons */}
           <div className="flex gap-3">
             <button onClick={onConfirm} disabled={isPending}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-sm transition-colors disabled:opacity-50">
-              {isPending ? 'Submitting…' : '✓ Confirm & Submit'}
+              {isPending ? 'Submitting…' : `✓ Submit ${selIndicatorList.length} Record${selIndicatorList.length !== 1 ? 's' : ''}`}
             </button>
             <button onClick={onCancel} disabled={isPending}
               className="flex-1 border-2 border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold py-3 rounded-xl text-sm">
@@ -426,17 +483,16 @@ export default function SubmitDataPage() {
   const [period,         setPeriod]         = useState('');
   const [submissionDate, setSubmissionDate]  = useState(() => new Date().toISOString().slice(0, 10));
 
-  // Step 3: Framework selection
-  const [activityId,  setActivityId]  = useState('');
-  const [indicatorId, setIndicatorId] = useState('');
+  // Step 3: Framework selection — multi-select via Sets
+  const [selectedActivities,  setSelectedActivities]  = useState(new Set());
+  const [selectedIndicators,  setSelectedIndicators]  = useState(new Set());
 
-  // Step 4: Data
-  const [progressVal,  setProgressVal]  = useState('');
-  const [binaryVal,    setBinaryVal]    = useState(null);  // for 'binary' formula
-  const [extraFields,  setExtraFields]  = useState({});   // formula-specific extra inputs
+  // Step 4: Data — per-indicator values keyed by indicatorId
+  const [indicatorValues, setIndicatorValues] = useState({}); // { [id]: { value: string, binaryVal: null|bool, extraFields: {} } }
   const [remarks,      setRemarks]      = useState('');
   const [attachments,  setAttachments]  = useState([]);
   const [uploading,    setUploading]    = useState(false);
+  const [submitResults, setSubmitResults] = useState(null); // null | { succeeded: [], failed: [] }
 
   // GPS location
   const [location, setLocation] = useState(null); // { lat, lng, name }
@@ -448,6 +504,33 @@ export default function SubmitDataPage() {
   // User meta
   const isSuperOrME  = ['super_admin', 'me_officer'].includes(user?.role);
   const isRestricted = ['data_collector', 'admin'].includes(user?.role);
+
+  // Multi-select toggle helpers
+  function toggleActivity(id) {
+    setSelectedActivities(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function toggleIndicator(id) {
+    setSelectedIndicators(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    // Init value entry for newly added indicator
+    setIndicatorValues(prev => {
+      if (prev[id]) return prev; // already exists
+      return { ...prev, [id]: { value: '', binaryVal: null, extraFields: {} } };
+    });
+  }
+  function setIndValue(id, field, val) {
+    setIndicatorValues(prev => ({
+      ...prev,
+      [id]: { ...(prev[id] || { value: '', binaryVal: null, extraFields: {} }), [field]: val },
+    }));
+  }
 
   // ── Auto-detect entity for restricted users ─────────────────────────────────
   useEffect(() => {
@@ -523,47 +606,39 @@ export default function SubmitDataPage() {
     });
   }, [chainRaw]);
 
-  // ── Derived selections ──────────────────────────────────────────────────────
-  const selActivity  = useMemo(() => {
+  // ── Derived selections — multi-select ───────────────────────────────────────
+  // Flat list of selected indicator objects with their parent context
+  const selIndicatorList = useMemo(() => {
+    const result = [];
     for (const obj of chain) {
       for (const out of obj.outputs || []) {
-        const act = out.activities?.find(a => a.id === activityId);
-        if (act) return { obj, out, act };
+        for (const ind of out.indicators || []) {
+          if (selectedIndicators.has(ind.id)) {
+            result.push({ obj, out, ind });
+          }
+        }
       }
     }
-    return null;
-  }, [chain, activityId]);
+    return result;
+  }, [chain, selectedIndicators]);
 
-  const selIndicator = useMemo(() => {
+  // Flat list of selected activity objects
+  const selActivityList = useMemo(() => {
+    const result = [];
     for (const obj of chain) {
       for (const out of obj.outputs || []) {
-        const ind = out.indicators?.find(i => i.id === indicatorId);
-        if (ind) return { obj, out, ind };
+        for (const act of out.activities || []) {
+          if (selectedActivities.has(act.id)) {
+            result.push({ obj, out, act });
+          }
+        }
       }
     }
-    return null;
-  }, [chain, indicatorId]);
+    return result;
+  }, [chain, selectedActivities]);
 
-  // ── Indicator targets ────────────────────────────────────────────────────────
-  const { data: targets = [] } = useQuery({
-    queryKey: ['indicator-targets', indicatorId, FISCAL_YEAR],
-    queryFn: () => indicatorsApi.getTargets(indicatorId, { fiscalYear: FISCAL_YEAR }).then(r => r.data),
-    enabled: !!indicatorId,
-  });
-
-  const myTarget = targets.find(t =>
-    (resolvedUnitId        && t.unitId        === resolvedUnitId)        ||
-    (resolvedDepartmentId  && t.departmentId  === resolvedDepartmentId)  ||
-    (resolvedInstitutionId && t.institutionId === resolvedInstitutionId)
-  ) || targets[0];
-
-  const periodTarget   = period && myTarget ? myTarget[P_KEY[period]] : null;
-  const progressNum    = parseFloat(progressVal) || 0;
-  const exceedsTarget  = periodTarget != null && progressNum > periodTarget;
-  const progressPct    = periodTarget != null && periodTarget > 0 && progressVal !== ''
-    ? Math.round((progressNum / periodTarget) * 100) : null;
-  const wc             = wordCount(remarks);
-  const wcExceeds      = wc > 1000;
+  const wc        = wordCount(remarks);
+  const wcExceeds = wc > 1000;
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   function selectEntity(kind, ent, instId, deptId, unitId) {
@@ -573,16 +648,10 @@ export default function SubmitDataPage() {
     setResolvedDepartmentId(deptId  || '');
     setResolvedUnitId(unitId         || '');
     setEntityLabel(ent.name);
-    // Reset downstream
-    setActivityId(''); setIndicatorId(''); setProgressVal('');
-  }
-
-  function handleSelectActivity(id) {
-    setActivityId(id);
-    setIndicatorId('');
-    setProgressVal('');
-    setExtraFields({});
-    setBinaryVal(null);
+    // Reset downstream selections
+    setSelectedActivities(new Set());
+    setSelectedIndicators(new Set());
+    setIndicatorValues({});
   }
 
   async function handleFileUpload(e) {
@@ -602,8 +671,6 @@ export default function SubmitDataPage() {
 
   const { mutateAsync, isPending } = useMutation({
     mutationFn: d => dataEntryApi.submit(d),
-    onSuccess: () => { toast.success('Activity submitted successfully!'); navigate('/data-entry'); },
-    onError: err => { toast.error(err.response?.data?.error || 'Submission failed'); setShowConfirm(false); },
   });
 
   async function captureGPS() {
@@ -628,67 +695,79 @@ export default function SubmitDataPage() {
     );
   }
 
-  const ind = selIndicator?.ind;
-  const formulaType = ind?.formulaType || 'achievement_pct';
-  const formulaConfig = ind?.formulaConfig || {};
-  const isBinaryFormula = formulaType === 'binary';
+  // ── Can proceed to step 4? At least one indicator must be selected ──────────
+  const canProceedStep3 = selectedIndicators.size > 0;
 
-  // Effective actual value: binary uses 1/0, others use progressNum
-  const effectiveActual = isBinaryFormula
-    ? (binaryVal === true ? 1 : binaryVal === false ? 0 : null)
-    : progressNum;
+  // ── Can submit? All selected indicators must have valid values ───────────────
+  const canSubmit = useMemo(() => {
+    if (!canProceedStep3 || !period || wcExceeds || !submissionDate) return false;
+    for (const { ind } of selIndicatorList) {
+      const entry = indicatorValues[ind.id] || {};
+      const isBin = ind.formulaType === 'binary';
+      if (isBin) {
+        if (entry.binaryVal === null || entry.binaryVal === undefined) return false;
+      } else {
+        if (!entry.value && entry.value !== 0) return false;
+      }
+    }
+    return true;
+  }, [canProceedStep3, period, wcExceeds, submissionDate, selIndicatorList, indicatorValues]);
 
-  // Live preview result
-  const livePreview = useMemo(() => {
-    if (effectiveActual == null && !isBinaryFormula) return null;
-    const a = isBinaryFormula ? effectiveActual : progressNum;
-    if (a == null || a === '' || isNaN(Number(a))) return null;
-    return previewCalculate(formulaType, formulaConfig, {
-      actualValue:   Number(a),
-      baselineValue: ind?.baselineValue,
-      target:        periodTarget,
-      extraFields:   isBinaryFormula ? {} : extraFields,
+  // ── Build all submission payloads ────────────────────────────────────────────
+  function buildPayloads() {
+    // One payload per selected indicator; activities are distributed by matching objectiveId
+    return selIndicatorList.map(({ obj, out, ind }) => {
+      const entry = indicatorValues[ind.id] || {};
+      const isBin = ind.formulaType === 'binary';
+      const actualValue = isBin
+        ? (entry.binaryVal === true ? 1 : 0)
+        : parseFloat(entry.value) || 0;
+      // Find a matching activity (from selected) that belongs to same output
+      const matchingAct = selActivityList.find(({ out: ao }) => ao.id === out.id);
+      return {
+        indicatorId:  ind.id,
+        activityId:   matchingAct?.act?.id || null,
+        objectiveId:  obj.id,
+        institutionId: resolvedInstitutionId || null,
+        departmentId:  resolvedDepartmentId  || null,
+        unitId:        resolvedUnitId        || null,
+        fiscalYear:    FISCAL_YEAR,
+        reportingPeriod: period,
+        actualValue,
+        extraFields:   Object.keys(entry.extraFields || {}).length > 0 ? entry.extraFields : undefined,
+        remarks:       remarks || null,
+        submissionDate,
+        attachments,
+        latitude:     location?.lat || null,
+        longitude:    location?.lng || null,
+        locationName: location?.name || null,
+      };
     });
-  }, [formulaType, formulaConfig, effectiveActual, progressNum, periodTarget, extraFields, ind, isBinaryFormula]);
+  }
 
-  const handleConfirmSubmit = () => mutateAsync({
-    indicatorId,
-    activityId,
-    objectiveId: selIndicator?.obj?.id || selActivity?.obj?.id || null,
-    institutionId: resolvedInstitutionId || null,
-    departmentId:  resolvedDepartmentId  || null,
-    unitId:        resolvedUnitId        || null,
-    fiscalYear:    FISCAL_YEAR,
-    reportingPeriod: period,
-    actualValue:   effectiveActual,
-    extraFields:   Object.keys(extraFields).length > 0 ? extraFields : undefined,
-    remarks:       remarks || null,
-    submissionDate,
-    attachments,
-    latitude:     location?.lat || null,
-    longitude:    location?.lng || null,
-    locationName: location?.name || null,
-  });
-
-  const canProceedStep3 = !!activityId && !!indicatorId;
-  const hasValue = isBinaryFormula ? binaryVal !== null : (progressVal !== '' && effectiveActual != null);
-  const canSubmit = canProceedStep3 && period && hasValue && !exceedsTarget && !wcExceeds && !!submissionDate;
-
-  const confirmData = {
-    fiscalYear:     FISCAL_YEAR,
-    period,
-    submissionDate,
-    entityLabel,
-    objectiveName:  selIndicator?.obj?.name  || selActivity?.obj?.name  || '',
-    outputName:     selIndicator?.out?.name  || selActivity?.out?.name  || '',
-    activityName:   selActivity?.act?.name   || '',
-    indicatorCode:  selIndicator?.ind?.code  || '',
-    indicatorName:  selIndicator?.ind?.name  || '',
-    unit:           selIndicator?.ind?.unit  || '',
-    actualValue:    progressNum,
-    pct:            progressPct,
-    attachments,
-  };
+  async function handleConfirmSubmit() {
+    const payloads = buildPayloads();
+    const succeeded = [];
+    const failed = [];
+    for (const payload of payloads) {
+      try {
+        await mutateAsync(payload);
+        succeeded.push(payload.indicatorId);
+      } catch (err) {
+        failed.push({ indicatorId: payload.indicatorId, error: err.response?.data?.error || 'Failed' });
+      }
+    }
+    setShowConfirm(false);
+    setSubmitResults({ succeeded, failed });
+    if (failed.length === 0) {
+      toast.success(`${succeeded.length} record${succeeded.length !== 1 ? 's' : ''} submitted successfully!`);
+      navigate('/data-entry');
+    } else if (succeeded.length > 0) {
+      toast.success(`${succeeded.length} submitted, ${failed.length} failed`);
+    } else {
+      toast.error('All submissions failed');
+    }
+  }
 
   // ── Search for entity step ──────────────────────────────────────────────────
   const [entitySearch, setEntitySearch] = useState('');
@@ -847,7 +926,7 @@ export default function SubmitDataPage() {
             {!isRestricted && (
               <button
                 type="button"
-                onClick={() => { setStep(1); setActivityId(''); setIndicatorId(''); setProgressVal(''); }}
+                onClick={() => { setStep(1); setSelectedActivities(new Set()); setSelectedIndicators(new Set()); setIndicatorValues({}); }}
                 className="shrink-0 text-blue-200 hover:text-white text-xs flex items-center gap-1 transition-colors"
               >
                 <ArrowPathIcon className="w-3.5 h-3.5" /> Change
@@ -944,31 +1023,32 @@ export default function SubmitDataPage() {
             <InformationCircleIcon className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
             <p className="text-xs text-indigo-700 leading-relaxed">
               The framework below shows objectives, performance targets, activities and indicators <strong>linked to your entity</strong> in the Results Framework.
-              Select <span className="font-semibold">one activity</span> and <span className="font-semibold">one indicator</span> to report on.
+              Select <span className="font-semibold">any number of activities and indicators</span> — all selected items will be submitted in one batch operation.
             </p>
           </div>
 
           {/* Selection summary chips */}
-          {(activityId || indicatorId) && (
-            <div className="flex flex-wrap gap-2">
-              {activityId && selActivity && (
-                <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-200">
-                  <CheckCircleIcon className="w-3.5 h-3.5" />
-                  Activity: {selActivity.act.name.substring(0, 40)}{selActivity.act.name.length > 40 ? '…' : ''}
-                  <button type="button" onClick={() => { setActivityId(''); setIndicatorId(''); setProgressVal(''); }} className="text-emerald-500 hover:text-emerald-700 ml-0.5">
+          {(selectedActivities.size > 0 || selectedIndicators.size > 0) && (
+            <div className="flex flex-wrap gap-2 bg-gray-50 border border-gray-200 rounded-xl p-3">
+              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider self-center">Selected:</span>
+              {selActivityList.map(({ act }) => (
+                <span key={act.id} className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1 rounded-full border border-emerald-200">
+                  <CheckCircleIcon className="w-3 h-3" />
+                  {act.name.substring(0, 30)}{act.name.length > 30 ? '…' : ''}
+                  <button type="button" onClick={() => toggleActivity(act.id)} className="text-emerald-500 hover:text-emerald-700">
                     <XMarkIcon className="w-3 h-3" />
                   </button>
                 </span>
-              )}
-              {indicatorId && selIndicator && (
-                <span className="inline-flex items-center gap-1.5 bg-violet-100 text-violet-800 text-xs font-semibold px-3 py-1.5 rounded-full border border-violet-200">
-                  <CheckBadgeIcon className="w-3.5 h-3.5" />
-                  {selIndicator.ind.code}: {selIndicator.ind.name.substring(0, 35)}{selIndicator.ind.name.length > 35 ? '…' : ''}
-                  <button type="button" onClick={() => { setIndicatorId(''); setProgressVal(''); }} className="text-violet-500 hover:text-violet-700 ml-0.5">
+              ))}
+              {selIndicatorList.map(({ ind }) => (
+                <span key={ind.id} className="inline-flex items-center gap-1.5 bg-violet-100 text-violet-800 text-xs font-semibold px-3 py-1 rounded-full border border-violet-200">
+                  <CheckBadgeIcon className="w-3 h-3" />
+                  {ind.code}: {ind.name.substring(0, 25)}{ind.name.length > 25 ? '…' : ''}
+                  <button type="button" onClick={() => toggleIndicator(ind.id)} className="text-violet-500 hover:text-violet-700">
                     <XMarkIcon className="w-3 h-3" />
                   </button>
                 </span>
-              )}
+              ))}
             </div>
           )}
 
@@ -981,10 +1061,10 @@ export default function SubmitDataPage() {
           ) : (
             <FrameworkTree
               chain={chain}
-              selectedActivity={activityId}
-              selectedIndicator={indicatorId}
-              onSelectActivity={handleSelectActivity}
-              onSelectIndicator={(id) => { setIndicatorId(id); setProgressVal(''); }}
+              selectedActivities={selectedActivities}
+              selectedIndicators={selectedIndicators}
+              onToggleActivity={toggleActivity}
+              onToggleIndicator={toggleIndicator}
             />
           )}
 
@@ -999,7 +1079,9 @@ export default function SubmitDataPage() {
                   : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               }`}
             >
-              {canProceedStep3 ? 'Enter Progress Data' : 'Select Activity & Indicator'}
+              {canProceedStep3
+                ? `Enter Data for ${selectedIndicators.size} Indicator${selectedIndicators.size !== 1 ? 's' : ''}`
+                : 'Select at least 1 Indicator'}
               <ChevronRightIcon className="w-4 h-4" />
             </button>
           </div>
@@ -1007,305 +1089,124 @@ export default function SubmitDataPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* STEP 4: DATA ENTRY                                     */}
+      {/* STEP 4: DATA ENTRY — one value field per indicator     */}
       {/* ════════════════════════════════════════════════════════ */}
       {step === 4 && (
         <div className="space-y-5">
 
           {/* Summary banner */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600">
-              <p className="text-xs text-blue-200 uppercase tracking-widest font-semibold">Submission Summary</p>
+            <div className="px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-between">
+              <p className="text-xs text-blue-200 uppercase tracking-widest font-semibold">Batch Submission</p>
+              <span className="text-xs text-blue-100 font-semibold bg-white/20 rounded-full px-2.5 py-0.5">
+                {selIndicatorList.length} indicator{selIndicatorList.length !== 1 ? 's' : ''}
+              </span>
             </div>
             <div className="px-5 py-4 divide-y divide-gray-100">
               {[
-                { label: 'Reporting Entity',    value: entityLabel },
-                { label: 'Period',               value: `${period} · FY ${FISCAL_YEAR}` },
-                { label: 'Strategic Objective',  value: selIndicator?.obj?.name  || selActivity?.obj?.name  || '—' },
-                { label: 'Performance Target',   value: selIndicator?.out?.name  || selActivity?.out?.name  || '—' },
-                { label: 'Planned Activity',     value: selActivity?.act?.name   || '—' },
-                { label: 'Performance Indicator',value: selIndicator ? `${selIndicator.ind.code} – ${selIndicator.ind.name}` : '—' },
-              ].map(r => (
+                { label: 'Reporting Entity', value: entityLabel },
+                { label: 'Period',           value: `${period} · FY ${FISCAL_YEAR}` },
+                selActivityList.length > 0
+                  ? { label: 'Activities', value: selActivityList.map(a => a.act.name).join(', ') }
+                  : null,
+              ].filter(Boolean).map(r => (
                 <div key={r.label} className="flex items-start gap-3 py-2">
-                  <span className="text-xs text-gray-400 w-36 shrink-0 pt-0.5">{r.label}</span>
+                  <span className="text-xs text-gray-400 w-28 shrink-0 pt-0.5">{r.label}</span>
                   <span className="text-xs text-gray-800 font-medium leading-snug">{r.value}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Indicator details + progress */}
-          {selIndicator && (
-            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-              <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/60">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Progress Against Target</p>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono">{selIndicator.ind.code} · {selIndicator.ind.unit}</p>
-              </div>
-              <div className="p-5 space-y-5">
-                {/* Baseline + Target */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <LockClosedIcon className="w-3.5 h-3.5 text-gray-400" />
-                      <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Baseline</span>
-                    </div>
-                    <p className="text-2xl font-extrabold text-gray-700">
-                      {selIndicator.ind.baselineValue != null ? selIndicator.ind.baselineValue.toLocaleString() : '—'}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">{selIndicator.ind.unit}</p>
+          {/* One card per selected indicator */}
+          {selIndicatorList.map(({ obj, out, ind }, idx) => {
+            const entry = indicatorValues[ind.id] || { value: '', binaryVal: null, extraFields: {} };
+            const isBin = ind.formulaType === 'binary';
+            const ft    = ind.formulaType || 'achievement_pct';
+            const fc    = ind.formulaConfig || {};
+            const fm    = FORMULA_META[ft];
+            const progressNum = parseFloat(entry.value) || 0;
+
+            const livePreview = (() => {
+              if (isBin) {
+                if (entry.binaryVal === null) return null;
+                return previewCalculate(ft, fc, { actualValue: entry.binaryVal ? 1 : 0, baselineValue: ind.baselineValue, target: null, extraFields: {} });
+              }
+              if (!entry.value) return null;
+              return previewCalculate(ft, fc, { actualValue: progressNum, baselineValue: ind.baselineValue, target: null, extraFields: entry.extraFields || {} });
+            })();
+
+            return (
+              <div key={ind.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                {/* Card header */}
+                <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60 flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-800 leading-snug">{ind.name}</p>
+                    <p className="text-[10px] text-gray-400 font-mono mt-0.5">{ind.code} · {ind.unit}</p>
                   </div>
-                  <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <LockClosedIcon className="w-3.5 h-3.5 text-gray-400" />
-                      <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{period} Target</span>
-                    </div>
-                    {periodTarget != null ? (
-                      <>
-                        <p className="text-2xl font-extrabold text-gray-700">{periodTarget.toLocaleString()}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{selIndicator.ind.unit}</p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-amber-500 font-semibold mt-2">Not set</p>
-                    )}
-                  </div>
+                  <span className="text-[10px] text-gray-400 shrink-0">{out.name.substring(0, 40)}{out.name.length > 40 ? '…' : ''}</span>
                 </div>
 
-                {/* ── Formula badge ──────────────────────────────────── */}
-                {(() => {
-                  const fm = FORMULA_META[formulaType];
-                  if (!fm) return null;
-                  return (
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                      <InformationCircleIcon className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                      <div>
-                        <span className="text-xs font-bold text-gray-700">{fm.label}</span>
-                        <span className="text-xs text-gray-400 ml-1.5 font-mono">{fm.description}</span>
-                      </div>
+                <div className="p-5 space-y-4">
+                  {/* Formula badge */}
+                  {fm && (
+                    <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                      <InformationCircleIcon className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span className="text-xs font-semibold text-blue-700">{fm.label}</span>
+                      <span className="text-xs text-blue-400 font-mono">{fm.description}</span>
                     </div>
-                  );
-                })()}
+                  )}
 
-                {/* ── Binary (Yes/No) ─────────────────────────────────── */}
-                {isBinaryFormula ? (
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      Was this milestone achieved? <span className="text-red-400">*</span>
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[{ v: true, label: '✓ Yes — Achieved', cls: binaryVal === true ? 'bg-green-600 text-white border-green-600' : 'border-gray-200 hover:border-green-400 text-gray-700' },
-                        { v: false, label: '✗ No — Not achieved', cls: binaryVal === false ? 'bg-red-500 text-white border-red-500' : 'border-gray-200 hover:border-red-300 text-gray-700' },
-                      ].map(({ v, label, cls }) => (
-                        <button key={String(v)} type="button"
-                          onClick={() => setBinaryVal(v)}
-                          className={`py-4 rounded-xl border-2 text-sm font-bold transition-all ${cls}`}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {binaryVal !== null && (
-                      <div className={`mt-3 p-3 rounded-xl text-sm font-semibold text-center ${
-                        binaryVal ? 'bg-green-50 text-green-700 border border-green-200'
-                                  : 'bg-red-50 text-red-700 border border-red-200'
-                      }`}>
-                        Achievement: {binaryVal ? '100%' : '0%'}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    {/* ── Main value input ─────────────────────────────── */}
+                  {/* Binary */}
+                  {isBin ? (
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        {FORMULA_META[formulaType]?.inputLabel || 'Progress Achieved'}{' '}
-                        <span className="text-red-400">*</span>
-                        <span className="text-xs text-gray-400 font-normal ml-1">
-                          ({selIndicator.ind.unit})
-                        </span>
+                        Was this milestone achieved? <span className="text-red-400">*</span>
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { v: true,  label: '✓ Yes — Achieved',    cls: entry.binaryVal === true  ? 'bg-green-600 text-white border-green-600' : 'border-gray-200 hover:border-green-400 text-gray-700' },
+                          { v: false, label: '✗ No — Not achieved', cls: entry.binaryVal === false ? 'bg-red-500 text-white border-red-500'     : 'border-gray-200 hover:border-red-300 text-gray-700' },
+                        ].map(({ v, label, cls }) => (
+                          <button key={String(v)} type="button"
+                            onClick={() => setIndValue(ind.id, 'binaryVal', v)}
+                            className={`py-3 rounded-xl border-2 text-sm font-bold transition-all ${cls}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        {fm?.inputLabel || 'Progress Achieved'} <span className="text-red-400">*</span>
+                        <span className="text-xs text-gray-400 font-normal ml-1">({ind.unit})</span>
                       </label>
                       <input
                         type="number" step="any" min="0"
                         className={`w-full rounded-xl border-2 px-4 py-3 text-xl font-bold outline-none transition-all ${
-                          exceedsTarget
-                            ? 'border-red-400 bg-red-50 focus:border-red-500 text-red-700'
-                            : progressVal
+                          entry.value
                             ? 'border-green-300 bg-green-50/30 focus:border-green-400 text-gray-900'
                             : 'border-gray-200 bg-white focus:border-blue-400 text-gray-900'
                         }`}
-                        placeholder={`Enter numeric value in ${selIndicator.ind.unit}`}
-                        value={progressVal}
-                        onChange={e => setProgressVal(e.target.value)}
+                        placeholder={`Enter value in ${ind.unit}`}
+                        value={entry.value}
+                        onChange={e => setIndValue(ind.id, 'value', e.target.value)}
                       />
                     </div>
+                  )}
 
-                    {/* ── Formula extra fields ──────────────────────────── */}
-                    {(() => {
-                      const fm = FORMULA_META[formulaType];
-                      const dynFields = fm?.extraFields;
-                      if (!dynFields || dynFields === 'dynamic' || !Array.isArray(dynFields) || dynFields.length === 0) return null;
-                      return (
-                        <div className="space-y-3 border border-dashed border-blue-200 rounded-xl p-4 bg-blue-50/30">
-                          <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
-                            Additional Inputs for {fm.label}
-                          </p>
-                          {dynFields.map(f => (
-                            <div key={f.key}>
-                              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                                {f.label}
-                                {f.required && <span className="text-red-400 ml-1">*</span>}
-                              </label>
-                              <input
-                                type={f.type || 'number'} step="any"
-                                className="input"
-                                placeholder={f.hint || ''}
-                                value={extraFields[f.key] || ''}
-                                onChange={e => setExtraFields(prev => ({ ...prev, [f.key]: e.target.value }))}
-                              />
-                              {f.hint && (
-                                <p className="text-[11px] text-gray-400 mt-0.5">{f.hint}</p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
-
-                    {/* ── Sub-indicator inputs for multi_input ─────────── */}
-                    {formulaType === 'multi_input' && (() => {
-                      const subs = formulaConfig?.subIndicators;
-                      if (!subs?.length) return (
-                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                          No sub-indicators configured for this indicator. Contact your M&E officer.
-                        </p>
-                      );
-                      return (
-                        <div className="border border-dashed border-purple-200 rounded-xl p-4 bg-purple-50/20 space-y-3">
-                          <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">Sub-indicator Values</p>
-                          {subs.map(s => (
-                            <div key={s.key}>
-                              <label className="block text-xs font-semibold text-gray-700 mb-1">{s.label}</label>
-                              <input
-                                type="number" step="any" className="input"
-                                placeholder={`Enter value for ${s.label}`}
-                                value={extraFields[s.key] || ''}
-                                onChange={e => setExtraFields(prev => ({ ...prev, [s.key]: e.target.value }))}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
-
-                    {/* ── Sub-indicator inputs for weighted_score ──────── */}
-                    {formulaType === 'weighted_score' && (() => {
-                      const subs = formulaConfig?.subIndicators;
-                      if (!subs?.length) return (
-                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                          No dimensions configured for this composite indicator.
-                        </p>
-                      );
-                      return (
-                        <div className="border border-dashed border-purple-200 rounded-xl p-4 bg-purple-50/20 space-y-3">
-                          <p className="text-xs font-semibold text-purple-800 uppercase tracking-wide">
-                            Dimension Values — Weighted Score
-                          </p>
-                          {subs.map(s => (
-                            <div key={s.key} className="flex items-center gap-3">
-                              <div className="flex-1">
-                                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                                  {s.label}
-                                  {s.weight && (
-                                    <span className="ml-1.5 text-[10px] text-purple-600 font-bold">
-                                      {Math.round(s.weight * 100)}% weight
-                                    </span>
-                                  )}
-                                </label>
-                                <input
-                                  type="number" step="any" className="input"
-                                  placeholder={s.target ? `Target: ${s.target}` : 'Enter value'}
-                                  value={extraFields[s.key] || ''}
-                                  onChange={e => setExtraFields(prev => ({ ...prev, [s.key]: e.target.value }))}
-                                />
-                              </div>
-                              {s.target && extraFields[s.key] && (
-                                <div className="text-center min-w-[52px]">
-                                  <p className="text-[10px] text-gray-400">vs target</p>
-                                  <p className={`text-sm font-bold ${
-                                    (parseFloat(extraFields[s.key]) / s.target) >= 1
-                                      ? 'text-green-600' : 'text-amber-600'
-                                  }`}>
-                                    {Math.min(Math.round((parseFloat(extraFields[s.key]) / s.target) * 100), 100)}%
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
-
-                    {/* ── Live calculation preview ──────────────────────── */}
-                    {livePreview && (
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Live Calculation</p>
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <p className="text-xs text-gray-500">Result</p>
-                            <p className="text-xl font-extrabold text-gray-900">
-                              {livePreview.displayValue || String(livePreview.result)}
-                            </p>
-                          </div>
-                          {livePreview.achievementPct != null && (
-                            <div>
-                              <p className="text-xs text-gray-500">Achievement</p>
-                              <p className={`text-xl font-extrabold ${statusColor(livePreview.achievementPct)}`}>
-                                {livePreview.achievementPct}%
-                              </p>
-                            </div>
-                          )}
-                          {livePreview.achievementPct != null && (() => {
-                            const b = statusBadge(livePreview.achievementPct);
-                            return (
-                              <span className={`self-end px-3 py-1 rounded-full text-xs font-bold ${b.cls}`}>
-                                {b.label}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        {livePreview.achievementPct != null && (
-                          <div className="mt-3">
-                            <ProgressMeter pct={Math.min(livePreview.achievementPct, 150)} />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {exceedsTarget && formulaType === 'achievement_pct' && (
-                      <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
-                        <ExclamationTriangleIcon className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-sm font-bold text-red-700">Value Exceeds Target</p>
-                          <p className="text-xs text-red-600 mt-0.5">
-                            Entered value ({progressNum.toLocaleString()}) exceeds the {period} target ({periodTarget?.toLocaleString()}). Please verify.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {!livePreview && progressPct != null && !exceedsTarget && (
-                      <div className="mt-3"><ProgressMeter pct={progressPct} /></div>
-                    )}
-
-                    {periodTarget == null && progressVal && formulaType === 'achievement_pct' && (
-                      <p className="text-xs text-amber-600 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                        <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />
-                        No target set for {period}: progress recorded but performance % cannot be calculated.
-                      </p>
-                    )}
-                  </>
-                )}
+                  {/* Live preview */}
+                  {livePreview && livePreview.achievementPct != null && (
+                    <ProgressMeter pct={Math.min(livePreview.achievementPct, 150)} />
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
 
           {/* Remarks */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
@@ -1432,10 +1333,16 @@ export default function SubmitDataPage() {
         </div>
       )}
 
-      {/* ── Confirm modal ─────────────────────────────────────── */}
+      {/* ── Batch confirm modal ──────────────────────────────── */}
       {showConfirm && (
-        <ConfirmModal
-          data={confirmData}
+        <BatchConfirmModal
+          selIndicatorList={selIndicatorList}
+          selActivityList={selActivityList}
+          indicatorValues={indicatorValues}
+          entityLabel={entityLabel}
+          period={period}
+          submissionDate={submissionDate}
+          attachments={attachments}
           onConfirm={handleConfirmSubmit}
           onCancel={() => setShowConfirm(false)}
           isPending={isPending}

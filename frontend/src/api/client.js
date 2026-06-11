@@ -12,6 +12,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Single-flight refresh: when several requests 401 at once (e.g. a dashboard
+// firing many calls), they all await ONE refresh instead of each firing their
+// own — which previously burst the auth rate-limiter and logged users out.
+let refreshPromise = null;
+function refreshAccessToken(refreshToken) {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post('/api/auth/refresh', { refreshToken })
+      .then(({ data }) => {
+        useAuthStore.getState().setAccessToken(data.accessToken);
+        return data.accessToken;
+      })
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -21,9 +38,8 @@ api.interceptors.response.use(
       const refreshToken = useAuthStore.getState().refreshToken;
       if (refreshToken) {
         try {
-          const { data } = await axios.post('/api/auth/refresh', { refreshToken });
-          useAuthStore.getState().setAccessToken(data.accessToken);
-          original.headers.Authorization = `Bearer ${data.accessToken}`;
+          const accessToken = await refreshAccessToken(refreshToken);
+          original.headers.Authorization = `Bearer ${accessToken}`;
           return api(original);
         } catch {
           useAuthStore.getState().logout();

@@ -567,11 +567,11 @@ export default function HelpPage() {
             m&amp;e@mit.go.tz
           </a>
           <a
-            href="tel:+255XXXXXXXXX"
+            href="tel:+255222134000"
             className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors rounded-lg px-4 py-2.5 text-sm font-medium"
           >
             <PhoneIcon className="w-4 h-4" />
-            +255 XXX XXX XXX
+            +255 22 213 4000
           </a>
         </div>
         <p className="text-blue-200 text-xs mt-3">

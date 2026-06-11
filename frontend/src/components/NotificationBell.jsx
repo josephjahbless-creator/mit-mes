@@ -19,14 +19,36 @@ function timeAgo(date) {
 }
 
 const TYPE_DOT = {
-  deadline:   'bg-orange-400',
-  approval:   'bg-green-500',
-  rejection:  'bg-red-500',
-  submission: 'bg-blue-500',
+  deadline:        'bg-orange-400',
+  approval:        'bg-green-500',
+  rejection:       'bg-red-500',
+  submission:      'bg-blue-500',
+  helpdesk_reply:  'bg-purple-500',
+  ai_risk:         'bg-red-400',
+  ai_anomaly:      'bg-amber-400',
 };
 
 function typeDot(type) {
   return TYPE_DOT[type] ?? 'bg-gray-400';
+}
+
+// Maps notification relatedType → frontend route
+// Returns the path to navigate to (relatedId available if needed for detail routes)
+const RELATED_ROUTES = {
+  'user-requests': ()   => '/admin/user-requests',
+  'SupportTicket': (id) => `/helpdesk`,
+  'ai_risk':       ()   => '/insights',
+  'ai_anomaly':    ()   => '/insights',
+  'submission':    (id) => `/data-entry/approval-queue`,
+  'dataEntry':     (id) => `/data-entry/${id}`,
+  'indicator':     (id) => `/indicators/${id}`,
+};
+
+function resolveNotificationRoute(relatedType, relatedId) {
+  const fn = RELATED_ROUTES[relatedType];
+  if (fn) return fn(relatedId);
+  // Fallback: try to build a sensible path
+  return `/${relatedType}`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -102,12 +124,19 @@ export default function NotificationBell() {
   }, [open]);
 
   function handleNotificationClick(n) {
-    if (!n.isRead) {
-      markRead.mutate(n.id ?? n._id);
+    const notifId  = n.id ?? n._id;
+    const relatedId = n.relatedId ?? n.related_id;
+
+    // Mark as read only if unread and we have a valid ID
+    if (!n.isRead && notifId) {
+      markRead.mutate(notifId);
     }
-    if (n.relatedType && (n.relatedId ?? n.related_id)) {
-      setOpen(false);
-      navigate(`/${n.relatedType}/${n.relatedId ?? n.related_id}`);
+
+    setOpen(false);
+
+    // Navigate to the correct frontend route using the mapping
+    if (n.relatedType) {
+      navigate(resolveNotificationRoute(n.relatedType, relatedId));
     }
   }
 
@@ -117,7 +146,7 @@ export default function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="relative flex items-center justify-center w-9 h-9 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-white/30"
+        className="relative flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-mit-blue hover:bg-blue-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-200"
         aria-label="Notifications"
       >
         <BellIcon className="w-5 h-5" />
@@ -128,9 +157,9 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {/* Dropdown panel */}
+      {/* Dropdown panel — fixed to top-right of viewport */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-gray-100 z-50 flex flex-col">
+        <div className="fixed top-4 right-4 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-gray-100 z-50 flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-800">

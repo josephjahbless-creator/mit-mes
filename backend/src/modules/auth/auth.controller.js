@@ -5,9 +5,10 @@ const dayjs = require('dayjs');
 const prisma = require('../../config/db');
 const { signAccess, signRefresh, verifyRefresh } = require('../../config/jwt');
 const { sendPasswordResetEmail, sendAccountLockedEmail } = require('../../utils/mailer');
+const logger = require('../../utils/logger');
 
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 5;
+const MAX_ATTEMPTS    = parseInt(process.env.LOGIN_MAX_ATTEMPTS    || '5');
+const LOCKOUT_MINUTES = parseInt(process.env.LOGIN_LOCKOUT_MINUTES || '30');
 
 const PASSWORD_RE = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
 
@@ -227,7 +228,7 @@ async function forgotPassword(req, res) {
   });
 
   sendPasswordResetEmail(user.email, user.name, token).catch((err) => {
-    console.error('[forgotPassword] email error:', err.message);
+    logger.error('forgotPassword email failed', { userId: user.id, error: err.message });
   });
 
   res.json({ message: 'If that email is registered, a reset link has been sent.' });

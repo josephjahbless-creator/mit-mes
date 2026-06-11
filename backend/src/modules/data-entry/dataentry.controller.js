@@ -4,6 +4,7 @@ const { getCurrentFiscalYear } = require('../../utils/fiscalYear');
 const { sendSubmissionNotification, sendApprovalNotification } = require('../../utils/mailer');
 const { emitToRole, emitToUser, emitGlobal } = require('../../lib/socket');
 const { generateSubmissionInsights } = require('../../services/insight.service');
+const indicatorCalculationService = require('../../services/indicatorCalculationService');
 
 async function listActuals(req, res) {
   const {
@@ -499,6 +500,14 @@ async function meReview(req, res) {
     // Fire-and-forget: generate narrative insights for this approved submission
     generateSubmissionInsights(updated.id).catch(() => {});
 
+    // Fire-and-forget: auto-recalculate any strategic indicators fed by this
+    // submission's activity (Dira ya Taifa 2050 automation).
+    indicatorCalculationService.onActualApproved(updated.id)
+      .then(({ recalculated }) => {
+        if (recalculated > 0) emitGlobal('dashboard:refresh', { type: 'indicator_recalc' });
+      })
+      .catch(() => {});
+
     const periodTargetKey = { Q1: 'q1Target', Q2: 'q2Target', Q3: 'q3Target', Q4: 'q4Target', Annual: 'annualTarget' };
     const tgt = await prisma.indicatorTarget.findFirst({
       where: {
@@ -554,6 +563,9 @@ async function approveActual(req, res) {
 
   // Generate narrative insights (fire-and-forget)
   generateSubmissionInsights(updated.id).catch(() => {});
+
+  // Auto-recalculate strategic indicators fed by this submission's activity (fire-and-forget)
+  indicatorCalculationService.onActualApproved(updated.id).catch(() => {});
 
   // Real-time broadcast to M&E officers
   emitToRole('me_officer', 'submission:approved', { actualId: updated.id, indicatorId: updated.indicatorId, achievementPct });

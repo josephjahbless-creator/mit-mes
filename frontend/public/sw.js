@@ -1,7 +1,7 @@
 // MIT M&E System — Service Worker
 // Provides offline fallback caching + browser push notifications
 
-const CACHE_NAME = 'mit-mes-v1';
+const CACHE_NAME = 'mit-mes-v2';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -57,43 +57,63 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // ── Fetch strategy ─────────────────────────────────────────────────────────────
-// - API requests: network-first (never serve stale data from cache)
-// - Static assets: cache-first (use cached version if available)
+// - API requests: passthrough (never cached)
+// - Code (JS/CSS): NETWORK-FIRST — never serve stale code. Vite dev modules and
+//   hashed prod bundles change, so cache-first here caused blank pages after a
+//   server restart. Cache is only an offline fallback.
+// - Media (images/fonts): cache-first (safe; they rarely change)
 // - Navigation (HTML): network-first with offline fallback to /index.html
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests and cross-origin requests
   if (event.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
 
-  // API calls — network only (don't cache API responses)
+  // API calls — let the network handle them, never cache
   if (url.pathname.startsWith('/api/')) return;
+  // Vite internals / source modules in dev — never intercept
+  if (url.pathname.startsWith('/@') || url.pathname.startsWith('/src/') || url.pathname.startsWith('/node_modules/')) return;
 
-  // Navigation requests — network first with fallback
+  // Navigation (HTML) — network first, offline fallback
   if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('/index.html')));
+    return;
+  }
+
+  const isCode  = url.pathname.match(/\.(js|mjs|css)$/);
+  const isMedia = url.pathname.match(/\.(png|jpg|jpeg|svg|ico|woff2?|gif|webp)$/);
+
+  if (isCode) {
+    // Network-first: always get fresh code; fall back to cache only if offline.
     event.respondWith(
-      fetch(event.request).catch(() =>
-        caches.match('/index.html')
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  if (isMedia) {
+    // Cache-first for media
+    event.respondWith(
+      caches.match(event.request).then((cached) =>
+        cached || fetch(event.request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
       )
     );
     return;
   }
 
-  // Static assets — cache first, then network
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        // Cache successful responses for static assets
-        if (response.ok && (
-          url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|ico|woff2?)$/)
-        )) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    })
-  );
+  // Everything else — straight to network
 });

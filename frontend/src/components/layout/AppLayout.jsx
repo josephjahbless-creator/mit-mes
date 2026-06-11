@@ -10,10 +10,12 @@ import {
   LightBulbIcon,
   ChartPieIcon, ClipboardDocumentCheckIcon,
   BanknotesIcon, EnvelopeIcon, ClipboardDocumentIcon,
-  ShieldCheckIcon, ServerStackIcon, BookOpenIcon, ArrowUpTrayIcon,
+  ShieldCheckIcon, ServerStackIcon, ArrowUpTrayIcon,
   ViewColumnsIcon, ChevronDownIcon, ChevronRightIcon, UserPlusIcon,
-  LifebuoyIcon, BellAlertIcon,
+  LifebuoyIcon, BellAlertIcon, SunIcon, MoonIcon, ComputerDesktopIcon,
+  CpuChipIcon,
 } from '@heroicons/react/24/outline';
+import useThemeStore from '../../store/themeStore';
 import { useQuery } from '@tanstack/react-query';
 import useAuthStore from '../../store/authStore';
 import { authApi, userRequestsApi } from '../../api';
@@ -24,35 +26,38 @@ import NotificationBell from '../NotificationBell';
 import SessionTimer from '../SessionTimer';
 import NetworkStatus from '../NetworkStatus';
 
-const mainNav = [
-  { name: 'Dashboard',           href: '/dashboard',                      icon: HomeIcon },
-  { name: 'Results Framework',   href: '/framework/ministerial',          icon: BuildingLibraryIcon },
-  { name: 'Theory of Change',    href: '/framework/toc',                  icon: LightBulbIcon },
-  { name: 'Indicators',          href: '/indicators',                     icon: ChartBarIcon },
-  { name: 'Indicator Library',   href: '/indicators/library',             icon: BookOpenIcon },
+// ── Navigation items per role ─────────────────────────────────────────────────
+// These are the BASE definitions; role filtering happens in the component.
+
+const mainNavAll = [
+  { name: 'Dashboard',           href: '/dashboard',                      icon: HomeIcon,              roles: ['all'] },
+  { name: 'Results Framework',   href: '/framework/ministerial',          icon: BuildingLibraryIcon,   roles: ['all'] },
+  { name: 'Theory of Change',    href: '/framework/toc',                  icon: LightBulbIcon,         roles: ['super_admin','admin','me_officer','data_collector'] },
+  { name: 'Indicators',          href: '/indicators',                     icon: ChartBarIcon,          roles: ['super_admin','admin','me_officer'] },
 ];
 
-const dataNav = [
-  { name: 'Data Entry',          href: '/data-entry',                     icon: ClipboardDocumentListIcon },
-  { name: 'Bulk Import',         href: '/data-entry/import',              icon: ArrowUpTrayIcon },
-  { name: 'Approval Queue',      href: '/data-entry/approval-queue',      icon: CheckBadgeIcon },
-  { name: 'Industry Statistics', href: '/data-entry/industry-statistics', icon: BuildingStorefrontIcon },
-  { name: 'Projects',            href: '/projects',                       icon: BriefcaseIcon },
-  { name: 'Activity Workplan',   href: '/workplan',                       icon: TableCellsIcon },
-  { name: 'Budget',              href: '/budget',                         icon: CurrencyDollarIcon },
-  { name: 'MTEF',                href: '/budget/mtef',                    icon: BanknotesIcon },
+const dataNavAll = [
+  { name: 'Data Entry',          href: '/data-entry',                     icon: ClipboardDocumentListIcon, roles: ['all'] },
+  { name: 'Bulk Import',         href: '/data-entry/import',              icon: ArrowUpTrayIcon,           roles: ['super_admin','admin','me_officer','data_collector'] },
+  { name: 'Approval Queue',      href: '/data-entry/approval-queue',      icon: CheckBadgeIcon,            roles: ['super_admin','admin','me_officer'] },
+  { name: 'Industry Statistics', href: '/data-entry/industry-statistics', icon: BuildingStorefrontIcon,    roles: ['super_admin','admin','me_officer'] },
+  { name: 'Projects',            href: '/projects',                       icon: BriefcaseIcon,             roles: ['super_admin','admin','me_officer','data_collector'] },
+  { name: 'Activity Workplan',   href: '/workplan',                       icon: TableCellsIcon,            roles: ['super_admin','admin','me_officer','data_collector'] },
+  { name: 'Budget',              href: '/budget',                         icon: CurrencyDollarIcon,        roles: ['super_admin','admin','me_officer'] },
+  { name: 'MTEF',                href: '/budget/mtef',                    icon: BanknotesIcon,             roles: ['super_admin','admin','me_officer'] },
 ];
 
 // All items inside the collapsible Reports group
-const reportsChildren = [
-  { name: 'Reports',             href: '/reports',                        icon: DocumentTextIcon },
-  { name: 'Analytics',           href: '/analytics',                      icon: SparklesIcon },
-  { name: 'SWOT Analysis',       href: '/analytics/swot',                 icon: ViewColumnsIcon },
-  { name: 'Insights',            href: '/insights',                       icon: BellAlertIcon },
-  { name: 'Completeness',        href: '/data-entry/completeness',        icon: ChartPieIcon },
-  { name: 'Documents',           href: '/documents',                      icon: FolderOpenIcon },
-  { name: 'Custom Forms',        href: '/forms',                          icon: ClipboardDocumentIcon },
-  { name: 'Helpdesk',            href: '/helpdesk',                       icon: LifebuoyIcon },
+const reportsChildrenAll = [
+  { name: 'Reports',             href: '/reports',                        icon: DocumentTextIcon,          roles: ['all'] },
+  { name: 'Analytics',           href: '/analytics',                      icon: SparklesIcon,              roles: ['super_admin','admin','me_officer'] },
+  { name: 'SWOT Analysis',       href: '/analytics/swot',                 icon: ViewColumnsIcon,           roles: ['super_admin','admin','me_officer'] },
+  { name: 'Insights',            href: '/insights',                       icon: BellAlertIcon,             roles: ['super_admin','admin','me_officer'] },
+  { name: 'AI Assistant',        href: '/insights/ai',                    icon: CpuChipIcon,               roles: ['super_admin','admin','me_officer'] },
+  { name: 'Completeness',        href: '/data-entry/completeness',        icon: ChartPieIcon,              roles: ['super_admin','admin','me_officer'] },
+  { name: 'Documents',           href: '/documents',                      icon: FolderOpenIcon,            roles: ['all'] },
+  { name: 'Custom Forms',        href: '/forms',                          icon: ClipboardDocumentIcon,     roles: ['all'] },
+  { name: 'Helpdesk',            href: '/helpdesk',                       icon: LifebuoyIcon,              roles: ['all'] },
 ];
 
 const reportsAdminChildren = [
@@ -72,13 +77,23 @@ const adminNav = [
   { name: 'Period Locks',        href: '/admin/period-locks',             icon: LockClosedIcon },
 ];
 
+// Helper to filter nav items by role
+function filterByRole(items, role) {
+  return items.filter(item => item.roles?.includes('all') || item.roles?.includes(role));
+}
+
 // Paths that belong to the Reports group — used to auto-open it
 const REPORTS_PATHS = [
   '/reports', '/analytics', '/documents', '/forms',
   '/data-entry/completeness', '/admin/audit-logs',
   '/framework/versions', '/admin/email-reports',
-  '/insights', '/helpdesk',
+  '/insights', '/insights/ai', '/helpdesk',
 ];
+
+// Legacy arrays (kept for REPORTS_PATHS and CollapsibleReports compatibility)
+const mainNav = mainNavAll;
+const dataNav = dataNavAll;
+const reportsChildren = reportsChildrenAll;
 
 function NavLink2({ item, badgeCount }) {
   return (
@@ -109,14 +124,15 @@ function SectionLabel({ label }) {
   );
 }
 
-function CollapsibleReports({ canAdmin, currentPath }) {
+function CollapsibleReports({ canAdmin, currentPath, userRole }) {
   // Auto-open if any child route is active
   const isChildActive = REPORTS_PATHS.some(p => currentPath.startsWith(p));
   const [open, setOpen] = useState(isChildActive);
 
+  const filteredReports = filterByRole(reportsChildren, userRole);
   const children = canAdmin
-    ? [...reportsChildren, ...reportsAdminChildren]
-    : reportsChildren;
+    ? [...filteredReports, ...reportsAdminChildren]
+    : filteredReports;
 
   return (
     <div>
@@ -152,6 +168,29 @@ function CollapsibleReports({ canAdmin, currentPath }) {
   );
 }
 
+function ThemeToggle() {
+  const { theme, setTheme } = useThemeStore();
+  const options = [
+    { value: 'light',  icon: SunIcon,             label: 'Light' },
+    { value: 'dark',   icon: MoonIcon,             label: 'Dark' },
+    { value: 'system', icon: ComputerDesktopIcon,  label: 'System' },
+  ];
+  return (
+    <div className="flex items-center gap-1 bg-blue-950/50 rounded-lg p-0.5">
+      {options.map(({ value, icon: Icon, label }) => (
+        <button
+          key={value}
+          onClick={() => setTheme(value)}
+          title={label}
+          className={`p-1.5 rounded-md transition-colors ${theme === value ? 'bg-blue-700 text-white' : 'text-blue-300 hover:text-white'}`}
+        >
+          <Icon className="w-3.5 h-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
@@ -181,7 +220,7 @@ export default function AppLayout() {
   useSocketEvent('notification:new', () => { if (canAdmin) refetchReqCount(); });
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
@@ -205,13 +244,13 @@ export default function AppLayout() {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          <NavSection items={mainNav} />
+          <NavSection items={filterByRole(mainNav, user?.role)} />
 
           <SectionLabel label="Data & Operations" />
-          <NavSection items={dataNav} />
+          <NavSection items={filterByRole(dataNav, user?.role)} />
 
           <SectionLabel label="Reports & Analytics" />
-          <CollapsibleReports canAdmin={canAdmin} currentPath={location.pathname} />
+          <CollapsibleReports canAdmin={canAdmin} currentPath={location.pathname} userRole={user?.role} />
 
           {canAdmin && (
             <>
@@ -220,6 +259,12 @@ export default function AppLayout() {
             </>
           )}
         </nav>
+
+        {/* Theme toggle */}
+        <div className="px-4 pb-2 flex items-center justify-between">
+          <span className="text-blue-400 text-xs">Theme</span>
+          <ThemeToggle />
+        </div>
 
         {/* User */}
         <div className="border-t border-blue-800 px-4 py-4 space-y-2">
@@ -231,7 +276,6 @@ export default function AppLayout() {
               <p className="text-white text-sm font-medium truncate">{user?.name}</p>
               <p className="text-blue-300 text-xs truncate capitalize">{user?.role?.replace(/_/g, ' ')}</p>
             </div>
-            <NotificationBell />
             <button onClick={handleLogout} className="text-blue-300 hover:text-white transition-colors" title="Logout">
               <ArrowRightOnRectangleIcon className="w-5 h-5" />
             </button>
@@ -250,15 +294,35 @@ export default function AppLayout() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-4 lg:hidden">
-          <button onClick={() => setSidebarOpen(true)} className="text-gray-500">
+        <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-4 shrink-0">
+          {/* Mobile menu button */}
+          <button onClick={() => setSidebarOpen(true)} className="text-gray-500 lg:hidden">
             <Bars3Icon className="w-6 h-6" />
           </button>
-          <span className="font-semibold text-mit-blue">Ministry of Industry & Trade: M&amp;E System</span>
+          <span className="font-semibold text-mit-blue lg:hidden">Ministry of Industry & Trade: M&amp;E System</span>
+          {/* Spacer — pushes bell to the right on desktop */}
+          <div className="flex-1" />
+          {/* Notification bell — visible on all screen sizes */}
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+          </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto p-6 relative">
+          {/* Tanzania coat of arms — subtle background watermark */}
+          <div
+            className="pointer-events-none fixed inset-0 flex items-center justify-center z-0 opacity-[0.03] dark:opacity-[0.04]"
+            aria-hidden="true"
+          >
+            <img
+              src="/tanzania-emblem.svg"
+              alt=""
+              className="w-[520px] h-[520px] object-contain select-none"
+            />
+          </div>
+          <div className="relative z-10">
+            <Outlet />
+          </div>
         </main>
       </div>
       <SessionTimer />

@@ -255,7 +255,7 @@ function ReviewTab() {
     queryFn:  () => institutionsApi.list().then(r => r.data),
   });
 
-  const { data: actualsResp = {}, isLoading } = useQuery({
+  const { data: actualsResp, isLoading } = useQuery({
     queryKey: ['actuals-review', filterStatus, filterPeriod, filterInst],
     queryFn: () => dataEntryApi.listActuals({
       fiscalYear:    FISCAL_YEAR,
@@ -265,7 +265,7 @@ function ReviewTab() {
       limit:         200,
     }).then(r => r.data),
   });
-  const actuals = actualsResp.data ?? actualsResp ?? [];
+  const actuals = Array.isArray(actualsResp?.data) ? actualsResp.data : Array.isArray(actualsResp) ? actualsResp : [];
 
   const approveMutation = useMutation({
     mutationFn: (id) => dataEntryApi.approve(id),
@@ -545,7 +545,7 @@ function SubmissionsTab() {
   const user = useAuthStore(s => s.user);
   const qc   = useQueryClient();
 
-  const { data: actualsAllResp = {}, isLoading } = useQuery({
+  const { data: actualsAllResp, isLoading } = useQuery({
     queryKey: ['actuals', 'all', selectedStatus],
     queryFn: () => dataEntryApi.listActuals({
       fiscalYear: FISCAL_YEAR,
@@ -553,7 +553,7 @@ function SubmissionsTab() {
       limit:      200,
     }).then(r => r.data),
   });
-  const actuals = actualsAllResp.data ?? actualsAllResp ?? [];
+  const actuals = Array.isArray(actualsAllResp?.data) ? actualsAllResp.data : Array.isArray(actualsAllResp) ? actualsAllResp : [];
 
   const approveMutation = useMutation({
     mutationFn: (id) => dataEntryApi.approve(id),

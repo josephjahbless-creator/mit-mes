@@ -186,6 +186,7 @@ model RefreshToken {
 
 model StrategicObjective {
   id            String   @id @default(uuid())
+  code          String?
   name          String
   description   String?
   orderNo       Int      @default(0)
@@ -204,6 +205,7 @@ model StrategicObjective {
 model Outcome {
   id          String   @id @default(uuid())
   objectiveId String
+  code        String?
   name        String
   description String?
   orderNo     Int      @default(0)
@@ -235,6 +237,7 @@ model Output {
 model Activity {
   id                       String         @id @default(uuid())
   outputId                 String
+  code                     String?
   name                     String
   description              String?
   orderNo                  Int            @default(0)
@@ -260,6 +263,7 @@ model Activity {
   mtefBudgets            MtefBudget[]
   actuals                IndicatorActual[]
   milestones             ActivityMilestone[]
+  activityToIndicatorMappings ActivityIndicatorMapping[] @relation("ActivityToIndicatorMappings")
 
   @@map("activities")
 }
@@ -322,6 +326,9 @@ model Indicator {
   disaggregatedActuals ActualDisaggregation[]
   forms    DataForm[]
   insights SystemInsight[]
+  activityToIndicatorMappings ActivityIndicatorMapping[] @relation("IndicatorToActivityMappings")
+  performanceData PerformanceData[] @relation("IndicatorPerformanceData")
+  calculationRules IndicatorCalculationRule[] @relation("IndicatorCalculationRules")
 
   @@map("indicators")
 }
@@ -654,6 +661,8 @@ model Project {
   milestones    ProjectMilestone[]
   activities    ProjectActivity[]
   expenditures  ProjectExpenditure[]
+  strategicObjectives ProjectStrategicObjective[]
+  progressSnapshots ProjectProgressSnapshot[] @relation("ProjectProgressSnapshots")
 
   @@map("projects")
 }
@@ -1247,3 +1256,257 @@ model SystemInsight {
   @@index([institutionId, fiscalYear])
   @@map("system_insights")
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════
+// ── DIRA YA TAIFA 2050 STRATEGIC INTEGRATION (7 Flagships & Automation Framework) ──
+// ═════════════════════════════════════════════════════════════════════════════════
+
+enum ContributionType {
+  primary
+  secondary
+  supporting
+}
+
+enum DataSourceType {
+  manual_entry
+  auto_calculated
+  imported
+}
+
+enum AggregationMethod {
+  sum
+  average
+  weighted_average
+  count
+  percentage
+  formula
+}
+
+enum EntityStatus {
+  draft
+  submitted
+  validated
+  final
+  archived
+}
+
+enum ObjectiveStatus {
+  on_track
+  at_risk
+  off_track
+  completed
+}
+
+// Strategic Objectives (7 Flagships from Dira ya Taifa 2050)
+model StrategicObjectiveDira {
+  id              String     @id @default(uuid())
+  code            String     @unique
+  name            String     @db.VarChar(255)
+  description     String?
+  vision_statement String?
+  priority_level  Int        @db.SmallInt
+  flagship_badge  String?
+  key_focus_areas Json?      // JSON array of focus areas
+  geographical_focus String?
+  estimated_investment_usd Decimal @default(0)
+  target_completion_year Int?
+  status          String     @default("active") @db.VarChar(50) // active|archived|planned
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  created_by      String?
+  updated_by      String?
+
+  projectObjectives ProjectStrategicObjective[]
+  progressSnapshots StrategicObjectiveProgress[]
+
+  @@index([status])
+  @@index([priority_level])
+  @@map("strategic_objectives_dira")
+}
+
+// Foundational Reforms
+model FoundationalReform {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String   @db.VarChar(255)
+  description     String?
+  institution_responsible String?
+  issue_addressed String?
+  recommendations String?
+  status          String   @default("active") @db.VarChar(50) // active|completed|archived
+  target_completion_date DateTime?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([status])
+  @@map("foundational_reforms")
+}
+
+// Junction: Projects ↔ Strategic Objectives (Many-to-Many)
+model ProjectStrategicObjective {
+  id                  String     @id @default(uuid())
+  projectId           String
+  strategic_objective_id String
+  contribution_type   String     @db.VarChar(50) @default("primary") // primary|secondary|supporting
+  weighting           Decimal    @default(100.00)
+  status              String     @default("active")
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
+
+  project              Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  strategicObjective   StrategicObjectiveDira @relation(fields: [strategic_objective_id], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, strategic_objective_id])
+  @@index([strategic_objective_id])
+  @@index([projectId])
+  @@map("project_strategic_objectives")
+}
+
+// Activity Indicator Mappings (defines how activities feed indicators)
+model ActivityIndicatorMapping {
+  id                   String     @id @default(uuid())
+  activity_id          String
+  indicator_id         String
+  contribution_type    String     @db.VarChar(50) // direct|indirect|supporting
+  aggregation_method   String     @db.VarChar(50) // sum|average|weighted_average|count|percentage|formula
+  weighting            Decimal    @default(100.00)
+  calculation_formula  String?
+  data_element_key     String?
+  enabled              Boolean    @default(true)
+  created_at           DateTime   @default(now())
+  updated_at           DateTime   @updatedAt
+
+  activity Activity @relation("ActivityToIndicatorMappings", fields: [activity_id], references: [id], onDelete: Cascade)
+  indicator Indicator @relation("IndicatorToActivityMappings", fields: [indicator_id], references: [id], onDelete: Restrict)
+
+  @@unique([activity_id, indicator_id])
+  @@index([indicator_id])
+  @@index([enabled])
+  @@map("activity_indicator_mappings")
+}
+
+// Performance Data (auto-calculated indicator values)
+model PerformanceData {
+  id                      String     @id @default(uuid())
+  indicator_id            String
+  period                  String     @db.VarChar(20)
+  period_start            DateTime
+  period_end              DateTime
+  actual_value            Decimal?
+  previous_value          Decimal?
+  target_value            Decimal?
+  baseline_value          Decimal?
+  achievement_percentage  Decimal?
+  data_source             String     @db.VarChar(50) // manual_entry|auto_calculated|imported
+  source_activities       Json?      // JSON array of activity IDs that contributed
+  calculation_formula_used String?
+  confidence_score        Decimal    @default(100)
+  status                  String     @db.VarChar(50) @default("draft") // draft|submitted|validated|final|archived
+  created_at              DateTime   @default(now())
+  created_by              String?
+  updated_at              DateTime   @updatedAt
+  updated_by              String?
+
+  indicator Indicator @relation("IndicatorPerformanceData", fields: [indicator_id], references: [id], onDelete: Cascade)
+
+  @@index([period_start, period_end])
+  @@index([indicator_id, period_start])
+  @@index([data_source])
+  @@index([status])
+  @@map("performance_data")
+}
+
+// Project Progress Snapshots
+model ProjectProgressSnapshot {
+  id                          String   @id @default(uuid())
+  project_id                  String
+  snapshot_date               DateTime @default(now())
+  overall_completion_percentage Int?
+  status                      String   @db.VarChar(50) // in_progress|tracking|on_schedule|at_risk|delayed
+  activities_completed        Int?
+  activities_total            Int?
+  indicators_on_track         Int?
+  indicators_total            Int?
+  forecasted_completion_date  DateTime?
+  created_at                  DateTime @default(now())
+
+  project Project @relation("ProjectProgressSnapshots", fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id, snapshot_date])
+  @@map("project_progress_snapshots")
+}
+
+// Strategic Objective Progress (aggregated)
+model StrategicObjectiveProgress {
+  id                      String   @id @default(uuid())
+  strategic_objective_id  String
+  snapshot_date           DateTime @default(now())
+  overall_achievement_percentage Int?
+  status                  String   @db.VarChar(50) // on_track|at_risk|off_track|completed
+  projects_active         Int?
+  projects_on_track       Int?
+  projects_at_risk        Int?
+  key_indicators_achieved Int?
+  key_indicators_total    Int?
+  flagged_risks           Json?    // JSON array of risk descriptions
+  last_updated_at         DateTime @default(now())
+
+  strategicObjective StrategicObjectiveDira @relation(fields: [strategic_objective_id], references: [id], onDelete: Cascade)
+
+  @@index([strategic_objective_id, snapshot_date])
+  @@map("strategic_objective_progress")
+}
+
+// Audit Trail for Automatic Updates
+model AuditTrailDira {
+  id                  String   @id @default(uuid())
+  entity_type         String   @db.VarChar(50) // indicator|project_progress|objective_progress|activity
+  entity_id           String
+  change_type         String   @db.VarChar(50) // created|updated|auto_calculated|rolled_back
+  previous_value      String?
+  new_value           String?
+  reason_code         String   @db.VarChar(100) // activity_completion|manual_edit|recalculation
+  triggered_by_id     String?
+  triggered_by_type   String   @db.VarChar(50) // activity|user|system
+  correlation_id      String?  // Links related changes
+  metadata            Json?
+  created_at          DateTime @default(now())
+  created_by          String?
+
+  @@index([entity_type, entity_id])
+  @@index([triggered_by_id, triggered_by_type])
+  @@index([correlation_id])
+  @@index([created_at])
+  @@map("audit_trail_dira")
+}
+
+// Indicator Calculation Rules
+model IndicatorCalculationRule {
+  id                          String   @id @default(uuid())
+  rule_name                   String   @db.VarChar(255)
+  indicator_id                String
+  activity_selection_criteria Json?    // JSON object with filters
+  aggregation_logic           String?
+  time_window                 Int      @default(90) // Days to look back
+  enabled                     Boolean  @default(true)
+  status                      String   @default("active")
+  created_at                  DateTime @default(now())
+  updated_at                  DateTime @updatedAt
+
+  indicator Indicator @relation("IndicatorCalculationRules", fields: [indicator_id], references: [id], onDelete: Cascade)
+
+  @@index([indicator_id])
+  @@index([enabled])
+  @@map("indicator_calculation_rules")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════
+// Update existing relations to support strategic integration
+// ═════════════════════════════════════════════════════════════════════════════════
+
+// These relations need to be added to existing models:
+// Activity: activityToIndicatorMappings ActivityIndicatorMapping[] @relation("ActivityToIndicatorMappings")
+// Indicator: activityToIndicatorMappings ActivityIndicatorMapping[] @relation("IndicatorToActivityMappings")
+//            performanceData PerformanceData[] @relation("IndicatorPerformanceData")
+//            calculationRules IndicatorCalculationRule[] @relation("IndicatorCalculationRules")
+// Project: progressSnapshots ProjectProgressSnapshot[] @relation("ProjectProgressSnapshots")

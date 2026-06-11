@@ -8,6 +8,7 @@ import {
   BuildingOfficeIcon, CalendarDaysIcon, CurrencyDollarIcon,
   Squares2X2Icon, ListBulletIcon,
 } from '@heroicons/react/24/outline';
+import ProjectsTabs from '../../components/ProjectsTabs';
 
 const STATUS_CFG = {
   planned:   { label: 'Planned',   color: 'bg-gray-100 text-gray-600' },
@@ -126,6 +127,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
+      <ProjectsTabs />
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

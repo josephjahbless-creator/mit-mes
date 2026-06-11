@@ -643,22 +643,25 @@ export default function LoginPage() {
 
       {/* Centered login card */}
       <div className="relative z-10 w-full max-w-md">
-        {/* Branding */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3 shadow-lg overflow-hidden border-2 border-white/30">
-            <img
-              src="/tanzania-emblem.svg"
-              alt="Tanzania National Emblem"
-              className="w-full h-full object-cover"
-              onError={e => {
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement.classList.add('bg-mit-gold');
-                e.currentTarget.parentElement.innerHTML = '<span class="text-white font-bold text-xl">M&amp;E</span>';
-              }}
-            />
+        {/* Branding — matches Watumishi Portal hierarchy */}
+        <div className="flex items-center justify-center gap-4 mb-6">
+          <img
+            src="/tanzania-emblem.svg"
+            alt="Tanzania National Emblem"
+            className="w-16 h-16 object-contain drop-shadow-lg flex-shrink-0"
+            onError={e => { e.currentTarget.style.display = 'none'; }}
+          />
+          <div>
+            <p className="text-white font-extrabold leading-tight drop-shadow-md" style={{ fontSize: '18px', letterSpacing: '1.5px' }}>
+              United Republic of Tanzania
+            </p>
+            <p className="text-white/85 font-medium drop-shadow mt-0.5" style={{ fontSize: '13px', letterSpacing: '0.5px' }}>
+              Ministry of Industry &amp; Trade
+            </p>
+            <p className="font-bold drop-shadow-md mt-1" style={{ color: '#F0B90B', fontSize: '14px', letterSpacing: '1.5px' }}>
+              M&amp;E System
+            </p>
           </div>
-          <h1 className="text-white text-xl font-bold drop-shadow-md leading-tight">Ministry of Industry and Trade</h1>
-          <p className="text-white/85 text-sm font-semibold mt-1 drop-shadow tracking-wide">M&amp;E System</p>
         </div>
 
         {/* Glass card */}

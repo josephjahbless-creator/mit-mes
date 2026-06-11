@@ -36,7 +36,7 @@ async function markRead(req, res) {
 
   const updated = await prisma.notification.update({
     where: { id: req.params.id },
-    data:  { isRead: true, readAt: new Date() },
+    data:  { isRead: true },
   });
   res.json(updated);
 }
@@ -45,7 +45,7 @@ async function markRead(req, res) {
 async function markAllRead(req, res) {
   const { count } = await prisma.notification.updateMany({
     where: { userId: req.user.id, isRead: false },
-    data:  { isRead: true, readAt: new Date() },
+    data:  { isRead: true },
   });
   res.json({ updated: count });
 }

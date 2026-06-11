@@ -98,27 +98,19 @@ const CustomFormSubmitPage  = lazy(() => import('./pages/forms/CustomFormSubmitP
 const BulkImportPage        = lazy(() => import('./pages/data-entry/BulkImportPage'));
 const IndicatorLibraryPage  = lazy(() => import('./pages/indicators/IndicatorLibraryPage'));
 const InsightsPage          = lazy(() => import('./pages/insights/InsightsPage'));
+const AiAssistantPage       = lazy(() => import('./pages/insights/AiAssistantPage'));
+const NotificationsPage     = lazy(() => import('./pages/NotificationsPage'));
+const FlagshipsPage         = lazy(() => import('./pages/framework/FlagshipsPage'));
+const StrategicMappingPage  = lazy(() => import('./pages/framework/StrategicMappingPage'));
 
 // ── Page loading skeleton ──────────────────────────────────────────────────────
 function PageLoader() {
   return (
-    <div className="p-6 space-y-5 animate-pulse">
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <div className="h-7 bg-gray-200 rounded-xl w-48" />
-          <div className="h-4 bg-gray-100 rounded w-64" />
-        </div>
-        <div className="h-10 bg-gray-200 rounded-xl w-28" />
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <div className="orbit-loader">
+        {[...Array(6)].map((_, i) => <div key={i} className="slice" />)}
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-28 bg-gray-100 rounded-2xl border border-gray-200" />
-        ))}
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="h-64 bg-gray-100 rounded-2xl border border-gray-200" />
-        <div className="h-64 bg-gray-100 rounded-2xl border border-gray-200" />
-      </div>
+      <p className="text-sm font-medium text-gray-400 dark:text-slate-500 tracking-wide">Loading…</p>
     </div>
   );
 }
@@ -170,10 +162,16 @@ export default function App() {
           {/* Dashboard */}
           <Route path="dashboard" element={<Page><DashboardPage /></Page>} />
 
+          {/* Notifications */}
+          <Route path="notifications" element={<Page><NotificationsPage /></Page>} />
+
           {/* Results Framework */}
           <Route path="framework" element={<Navigate to="/framework/ministerial" replace />} />
           <Route path="framework/edit"        element={<Page><FrameworkPage /></Page>} />
           <Route path="framework/ministerial" element={<Page><MinisterialRFPage /></Page>} />
+          {/* Legacy paths — redirect into the Projects Module where these now live */}
+          <Route path="framework/flagships"   element={<Navigate to="/projects/flagships" replace />} />
+          <Route path="framework/mapping"     element={<Navigate to="/projects/mapping" replace />} />
           <Route path="framework/toc"         element={<Page><TheoryOfChangePage /></Page>} />
           <Route path="framework/versions"    element={
             <RequireRole roles={['super_admin', 'admin', 'me_officer']}>
@@ -213,8 +211,14 @@ export default function App() {
             </RequireRole>
           } />
 
-          {/* Projects */}
+          {/* Projects Module — includes Strategic Flagships & Activity Mapping */}
           <Route path="projects"          element={<Page><ProjectsPage /></Page>} />
+          <Route path="projects/flagships" element={<Page><FlagshipsPage /></Page>} />
+          <Route path="projects/mapping"  element={
+            <RequireRole roles={['super_admin', 'admin', 'me_officer']}>
+              <Page><StrategicMappingPage /></Page>
+            </RequireRole>
+          } />
           <Route path="projects/new"      element={<Page><ProjectFormPage /></Page>} />
           <Route path="projects/:id"      element={<Page><ProjectDetailPage /></Page>} />
           <Route path="projects/:id/edit" element={<Page><ProjectFormPage /></Page>} />
@@ -229,6 +233,11 @@ export default function App() {
           <Route path="analytics"      element={<Page><AnalyticsPage /></Page>} />
           <Route path="analytics/swot" element={<Page><SwotPage /></Page>} />
           <Route path="insights"       element={<Page><InsightsPage /></Page>} />
+          <Route path="insights/ai"    element={
+            <RequireRole roles={['super_admin', 'admin', 'me_officer']}>
+              <Page><AiAssistantPage /></Page>
+            </RequireRole>
+          } />
 
           {/* Documents */}
           <Route path="documents" element={<Page><DocumentsPage /></Page>} />

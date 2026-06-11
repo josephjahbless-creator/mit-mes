@@ -215,6 +215,21 @@ function scheduleTokenCleanup() {
   console.log('[TokenCleanup] Daily token cleanup job registered (03:00 AM)');
 }
 
+// ── Daily strategic progress snapshot (02:00 AM) ───────────────────────────────
+// Writes project_progress_snapshots + strategic_objective_progress rows so the
+// flagship and project dashboards can show trends over time (Dira ya Taifa 2050).
+function scheduleProgressSnapshot() {
+  const { runSnapshot } = require('../../services/progressSnapshotService');
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      await runSnapshot();
+    } catch (err) {
+      console.error('[ProgressSnapshot] Daily snapshot error:', err.message);
+    }
+  });
+  console.log('[ProgressSnapshot] Daily strategic progress snapshot registered (02:00 AM)');
+}
+
 // ── Start all active cron jobs ─────────────────────────────────────────────────
 async function startScheduler() {
   try {
@@ -225,6 +240,7 @@ async function startScheduler() {
     console.log(`[EmailScheduler] Started ${schedules.length} schedule(s)`);
     scheduleNationalInsights();
     scheduleTokenCleanup();
+    scheduleProgressSnapshot();
   } catch (err) {
     console.error('[EmailScheduler] Failed to start:', err.message);
   }

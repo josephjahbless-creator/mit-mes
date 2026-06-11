@@ -2,6 +2,7 @@ const express = require('express');
 const axios   = require('axios');
 const prisma  = require('../../config/db');
 const { authenticate, authorize } = require('../../middleware/auth');
+const { encrypt, decrypt } = require('../../utils/crypto');
 
 const router = express.Router();
 router.use(authenticate, authorize('super_admin', 'admin'));
@@ -51,7 +52,7 @@ router.get('/:system', async (req, res) => {
   res.json(safe);
 });
 
-// PUT /external-integrations/:system — configure
+// PUT /external-integrations/:system — configure (credentials are encrypted at rest)
 router.put('/:system', async (req, res) => {
   if (!VALID_SYSTEMS.includes(req.params.system)) {
     return res.status(400).json({ error: 'Unknown system' });
@@ -62,21 +63,26 @@ router.put('/:system', async (req, res) => {
     create: {
       system: req.params.system,
       displayName: req.params.system.toUpperCase(),
-      baseUrl, apiKey, username, passwordEncrypted, clientId, clientSecret,
+      baseUrl,
+      apiKey:            apiKey            ? encrypt(apiKey)            : null,
+      username,
+      passwordEncrypted: passwordEncrypted ? encrypt(passwordEncrypted) : null,
+      clientId,
+      clientSecret:      clientSecret      ? encrypt(clientSecret)      : null,
       syncConfig: syncConfig || null, isEnabled: isEnabled || false,
     },
     update: {
-      ...(baseUrl            !== undefined ? { baseUrl }            : {}),
-      ...(apiKey             !== undefined ? { apiKey }             : {}),
-      ...(username           !== undefined ? { username }           : {}),
-      ...(passwordEncrypted  !== undefined ? { passwordEncrypted }  : {}),
-      ...(clientId           !== undefined ? { clientId }           : {}),
-      ...(clientSecret       !== undefined ? { clientSecret }       : {}),
-      ...(syncConfig         !== undefined ? { syncConfig }         : {}),
-      ...(isEnabled          !== undefined ? { isEnabled }          : {}),
+      ...(baseUrl            !== undefined ? { baseUrl }                              : {}),
+      ...(apiKey             !== undefined ? { apiKey: apiKey ? encrypt(apiKey) : null } : {}),
+      ...(username           !== undefined ? { username }                             : {}),
+      ...(passwordEncrypted  !== undefined ? { passwordEncrypted: passwordEncrypted ? encrypt(passwordEncrypted) : null } : {}),
+      ...(clientId           !== undefined ? { clientId }                             : {}),
+      ...(clientSecret       !== undefined ? { clientSecret: clientSecret ? encrypt(clientSecret) : null } : {}),
+      ...(syncConfig         !== undefined ? { syncConfig }                           : {}),
+      ...(isEnabled          !== undefined ? { isEnabled }                            : {}),
     },
   });
-  res.json({ ...integration, passwordEncrypted: integration.passwordEncrypted ? '••••••' : null });
+  res.json({ ...integration, apiKey: integration.apiKey ? '••••••' : null, passwordEncrypted: integration.passwordEncrypted ? '••••••' : null, clientSecret: integration.clientSecret ? '••••••' : null });
 });
 
 // POST /external-integrations/:system/test — test connection
@@ -95,11 +101,11 @@ router.post('/:system/test', async (req, res) => {
   };
 
   try {
-    const url  = testUrls[system] || `${cfg.baseUrl}/api/health`;
-    const auth = cfg.username && cfg.passwordEncrypted
-      ? { username: cfg.username, password: cfg.passwordEncrypted }
-      : undefined;
-    const headers = cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {};
+    const url     = testUrls[system] || `${cfg.baseUrl}/api/health`;
+    const apiKey  = decrypt(cfg.apiKey);
+    const pass    = decrypt(cfg.passwordEncrypted);
+    const auth    = cfg.username && pass ? { username: cfg.username, password: pass } : undefined;
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
     const resp = await axios.get(url, { auth, headers, timeout: 8000 });
     res.json({ success: true, statusCode: resp.status, message: 'Connection successful' });
   } catch (err) {
@@ -159,7 +165,7 @@ router.get('/:system/logs', async (req, res) => {
 
 // ── DHIS2 sync ────────────────────────────────────────────────────────────────
 async function syncDhis2(cfg, errors) {
-  const auth    = { username: cfg.username, password: cfg.passwordEncrypted };
+  const auth    = { username: cfg.username, password: decrypt(cfg.passwordEncrypted) };
   const headers = { 'Content-Type': 'application/json' };
   const mappings = cfg.syncConfig?.fieldMappings || [];
 
@@ -210,7 +216,7 @@ async function syncKoboToolbox(cfg, errors) {
 
   const url  = `${cfg.baseUrl}/api/v2/assets/${assetUid}/data/?format=json`;
   const resp = await axios.get(url, {
-    headers: { Authorization: `Token ${cfg.apiKey}` }, timeout: 15000,
+    headers: { Authorization: `Token ${decrypt(cfg.apiKey)}` }, timeout: 15000,
   });
 
   const submissions = resp.data?.results || [];
@@ -258,7 +264,7 @@ async function syncKoboToolbox(cfg, errors) {
 async function syncPlanrep(cfg, errors) {
   // PLANREP Tanzania: fetch budget plans for activities
   const url    = `${cfg.baseUrl}/api/budgets`;
-  const headers = { Authorization: `Bearer ${cfg.apiKey || ''}` };
+  const headers = { Authorization: `Bearer ${decrypt(cfg.apiKey) || ''}` };
   const resp = await axios.get(url, { headers, timeout: 15000 });
   const plans = resp.data?.data || resp.data || [];
   let imported = 0;
@@ -297,7 +303,7 @@ async function syncIfms(cfg, errors) {
   // IFMS Tanzania: fetch expenditures
   const fiscalYear = cfg.syncConfig?.fiscalYear || '2025-2026';
   const url = `${cfg.baseUrl}/api/expenditures?fiscalYear=${fiscalYear}`;
-  const headers = { Authorization: `Bearer ${cfg.apiKey || ''}` };
+  const headers = { Authorization: `Bearer ${decrypt(cfg.apiKey) || ''}` };
   const resp = await axios.get(url, { headers, timeout: 15000 });
   const expenditures = resp.data?.data || resp.data || [];
   let imported = 0;

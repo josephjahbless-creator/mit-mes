@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const ACCESS_SECRET  = process.env.JWT_SECRET;
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
@@ -17,7 +18,10 @@ function signAccess(payload) {
 }
 
 function signRefresh(payload) {
-  return jwt.sign(payload, REFRESH_SECRET, { ...SIGN_OPTS, expiresIn: REFRESH_EXPIRES });
+  // Add a random jti so every refresh token is unique even when two logins land
+  // in the same second — otherwise identical {id}+iat produced an identical token
+  // string and collided on the unique `token` column (P2002 -> 409 on login).
+  return jwt.sign({ ...payload, jti: crypto.randomUUID() }, REFRESH_SECRET, { ...SIGN_OPTS, expiresIn: REFRESH_EXPIRES });
 }
 
 function verifyAccess(token) {

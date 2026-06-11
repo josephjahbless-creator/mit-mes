@@ -2,12 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── CSS variables ──────────────────────────────────────────────────────────── */
+:root {
+  --bg-page:       #f9fafb;
+  --bg-card:       #ffffff;
+  --bg-input:      #ffffff;
+  --bg-hover:      #f3f4f6;
+  --bg-muted:      #f3f4f6;
+  --text-primary:  #111827;
+  --text-secondary:#4b5563;
+  --text-muted:    #9ca3af;
+  --border:        #e5e7eb;
+  --border-input:  #d1d5db;
+}
+
+.dark {
+  --bg-page:       #0f172a;
+  --bg-card:       #1e293b;
+  --bg-input:      #1e293b;
+  --bg-hover:      #334155;
+  --bg-muted:      #334155;
+  --text-primary:  #f1f5f9;
+  --text-secondary:#cbd5e1;
+  --text-muted:    #64748b;
+  --border:        #334155;
+  --border-input:  #475569;
+  color-scheme: dark;
+}
+
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 font-sans;
+    @apply font-sans;
+    background-color: var(--bg-page);
+    color: var(--text-primary);
+    transition: background-color 0.2s, color 0.2s;
   }
 }
 
+/* ── Component classes (light + dark) ───────────────────────────────────────── */
 @layer components {
   .btn {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
@@ -16,26 +48,170 @@
     @apply btn bg-mit-blue text-white hover:bg-blue-900 focus:ring-mit-blue;
   }
   .btn-secondary {
-    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-gray-300;
+    @apply btn border text-sm font-medium transition-colors;
+    background-color: var(--bg-card);
+    color: var(--text-secondary);
+    border-color: var(--border-input);
+  }
+  .btn-secondary:hover {
+    background-color: var(--bg-hover);
   }
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+    @apply rounded-xl shadow-sm p-6 transition-colors;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
   }
   .input {
-    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-mit-blue focus:border-transparent;
+    @apply w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-mit-blue focus:border-transparent transition-colors;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text-primary);
+  }
+  .input::placeholder {
+    color: var(--text-muted);
   }
   .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+    @apply block text-sm font-medium mb-1;
+    color: var(--text-secondary);
   }
   .badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
-  .badge-green { @apply badge bg-green-100 text-green-800; }
+  .badge-green  { @apply badge bg-green-100  text-green-800; }
   .badge-yellow { @apply badge bg-yellow-100 text-yellow-800; }
-  .badge-red { @apply badge bg-red-100 text-red-800; }
-  .badge-blue { @apply badge bg-blue-100 text-blue-800; }
-  .badge-gray { @apply badge bg-gray-100 text-gray-700; }
+  .badge-red    { @apply badge bg-red-100    text-red-800; }
+  .badge-blue   { @apply badge bg-blue-100   text-blue-800; }
+  .badge-gray   { @apply badge bg-gray-100   text-gray-700; }
 }
+
+/* ── Global dark-mode overrides for inline Tailwind classes ─────────────────── */
+
+/* Backgrounds */
+html.dark .bg-white          { background-color: #1e293b !important; }
+html.dark .bg-gray-50        { background-color: #0f172a !important; }
+html.dark .bg-gray-100       { background-color: #1e293b !important; }
+html.dark .bg-gray-200       { background-color: #334155 !important; }
+html.dark .hover\:bg-gray-50:hover  { background-color: #334155 !important; }
+html.dark .hover\:bg-gray-100:hover { background-color: #334155 !important; }
+html.dark .hover\:bg-gray-200:hover { background-color: #475569 !important; }
+
+/* Text */
+html.dark .text-gray-900 { color: #f1f5f9 !important; }
+html.dark .text-gray-800 { color: #e2e8f0 !important; }
+html.dark .text-gray-700 { color: #cbd5e1 !important; }
+html.dark .text-gray-600 { color: #94a3b8 !important; }
+html.dark .text-gray-500 { color: #64748b !important; }
+html.dark .text-gray-400 { color: #475569 !important; }
+
+/* Borders */
+html.dark .border-gray-100  { border-color: #334155 !important; }
+html.dark .border-gray-200  { border-color: #334155 !important; }
+html.dark .border-gray-300  { border-color: #475569 !important; }
+html.dark .divide-gray-100 > * + * { border-color: #334155 !important; }
+html.dark .divide-gray-200 > * + * { border-color: #334155 !important; }
+
+/* Rings */
+html.dark .ring-gray-200 { --tw-ring-color: #334155 !important; }
+
+/* Tables */
+html.dark table             { color: #e2e8f0; }
+html.dark thead             { background-color: #0f172a !important; }
+html.dark .bg-gray-50 thead { background-color: #0f172a !important; }
+html.dark th                { color: #94a3b8 !important; border-color: #334155 !important; }
+html.dark td                { border-color: #334155 !important; }
+html.dark tr:hover          { background-color: #334155 !important; }
+html.dark .even\:bg-gray-50:nth-child(even)  { background-color: #1a2744 !important; }
+html.dark .odd\:bg-white:nth-child(odd)      { background-color: #1e293b !important; }
+
+/* Selects & textareas */
+html.dark select, html.dark textarea {
+  background-color: #1e293b !important;
+  border-color:     #475569 !important;
+  color:            #f1f5f9 !important;
+}
+html.dark select option { background-color: #1e293b; color: #f1f5f9; }
+
+/* Modals / overlays */
+html.dark .bg-white.rounded-xl,
+html.dark .bg-white.rounded-2xl {
+  background-color: #1e293b !important;
+  color: #f1f5f9;
+}
+
+/* Stats / summary panels */
+html.dark .bg-blue-50   { background-color: #1e3a5f !important; }
+html.dark .bg-green-50  { background-color: #14532d !important; }
+html.dark .bg-red-50    { background-color: #450a0a !important; }
+html.dark .bg-amber-50  { background-color: #451a03 !important; }
+html.dark .bg-yellow-50 { background-color: #422006 !important; }
+html.dark .bg-indigo-50 { background-color: #1e1b4b !important; }
+html.dark .bg-purple-50 { background-color: #3b0764 !important; }
+html.dark .bg-teal-50   { background-color: #042f2e !important; }
+
+/* Shadows */
+html.dark .shadow-sm  { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4) !important; }
+html.dark .shadow     { box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.5) !important; }
+html.dark .shadow-lg  { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.6) !important; }
+html.dark .shadow-xl  { box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.7) !important; }
+
+/* Scrollbar */
+html.dark ::-webkit-scrollbar       { width: 6px; height: 6px; }
+html.dark ::-webkit-scrollbar-track { background: #0f172a; }
+html.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Orbit loader (inspired by Watumishi Portal) ────────────────────────────── */
+.orbit-loader {
+  --uib-size: 56px;
+  --uib-speed: 1s;
+  --uib-color: #1B3A6B;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: var(--uib-size);
+  width: var(--uib-size);
+}
+.orbit-loader .slice {
+  position: relative;
+  height: calc(var(--uib-size) / 6);
+  width: 100%;
+}
+.orbit-loader .slice::before,
+.orbit-loader .slice::after {
+  --uib-a: calc(var(--uib-speed) / -2);
+  --uib-b: calc(var(--uib-speed) / -6);
+  content: '';
+  position: absolute;
+  top: 0;
+  left: calc(50% - var(--uib-size) / 12);
+  height: 100%;
+  width: calc(100% / 6);
+  border-radius: 50%;
+  background-color: var(--uib-color);
+  animation: orbit-spin var(--uib-speed) linear infinite;
+}
+.orbit-loader .slice:nth-child(1)::after  { animation-delay: calc(var(--uib-a)); }
+.orbit-loader .slice:nth-child(2)::before { animation-delay: calc(var(--uib-b)); }
+.orbit-loader .slice:nth-child(2)::after  { animation-delay: calc(var(--uib-a) + var(--uib-b)); }
+.orbit-loader .slice:nth-child(3)::before { animation-delay: calc(var(--uib-b) * 2); }
+.orbit-loader .slice:nth-child(3)::after  { animation-delay: calc(var(--uib-a) + var(--uib-b) * 2); }
+.orbit-loader .slice:nth-child(4)::before { animation-delay: calc(var(--uib-b) * 3); }
+.orbit-loader .slice:nth-child(4)::after  { animation-delay: calc(var(--uib-a) + var(--uib-b) * 3); }
+.orbit-loader .slice:nth-child(5)::before { animation-delay: calc(var(--uib-b) * 4); }
+.orbit-loader .slice:nth-child(5)::after  { animation-delay: calc(var(--uib-a) + var(--uib-b) * 4); }
+.orbit-loader .slice:nth-child(6)::before { animation-delay: calc(var(--uib-b) * 5); }
+.orbit-loader .slice:nth-child(6)::after  { animation-delay: calc(var(--uib-a) + var(--uib-b) * 5); }
+
+@keyframes orbit-spin {
+  0%   { transform: translateX(calc(var(--uib-size) *  0.250)) scale(0.737); opacity: 0.65; }
+  25%  { transform: translateX(0%)                              scale(0.474); opacity: 0.30; }
+  50%  { transform: translateX(calc(var(--uib-size) * -0.250)) scale(0.737); opacity: 0.65; }
+  75%  { transform: translateX(0%)                              scale(1.000); opacity: 1.00; }
+  100% { transform: translateX(calc(var(--uib-size) *  0.250)) scale(0.737); opacity: 0.65; }
+}
+
+html.dark .orbit-loader { --uib-color: #93c5fd; }

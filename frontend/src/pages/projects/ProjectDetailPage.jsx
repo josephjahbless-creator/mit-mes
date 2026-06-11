@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { projectsApi } from '../../api';
+import { projectsApi, flagshipsApi } from '../../api';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import {
   ArrowLeftIcon, PlusIcon, PencilSquareIcon, TrashIcon,
   CheckCircleIcon, ClockIcon, XCircleIcon, ExclamationTriangleIcon,
   LightBulbIcon, CurrencyDollarIcon, ChartBarIcon,
-  BuildingOfficeIcon, CalendarDaysIcon, FlagIcon,
+  BuildingOfficeIcon, CalendarDaysIcon, FlagIcon, RocketLaunchIcon,
 } from '@heroicons/react/24/outline';
 
 const STATUS_CFG = {
@@ -316,6 +316,11 @@ export default function ProjectDetailPage() {
     queryFn: () => projectsApi.get(id).then(r => r.data),
   });
 
+  const { data: flagshipLinks = [] } = useQuery({
+    queryKey: ['project-flagships', id],
+    queryFn: () => flagshipsApi.projectFlagships(id).then(r => r.data.data),
+  });
+
   const inv = () => qc.invalidateQueries(['project', id]);
 
   const { mutateAsync: createMs,  isPending: p1 } = useMutation({ mutationFn: d => projectsApi.createMilestone(id, d),  onSuccess: inv, onError: () => toast.error('Failed') });
@@ -359,6 +364,17 @@ export default function ProjectDetailPage() {
           </div>
           {project.code && <p className="text-xs text-gray-400 font-mono mt-0.5">{project.code}</p>}
           {project.goal && <p className="text-sm text-gray-600 mt-2 max-w-2xl">{project.goal}</p>}
+          {flagshipLinks.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-3">
+              <RocketLaunchIcon className="w-3.5 h-3.5 text-blue-600" />
+              {flagshipLinks.map(l => (
+                <span key={l.id} title={l.strategicObjective?.name}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                  {l.strategicObjective?.code} · {l.strategicObjective?.name}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {canAdmin && (
           <div className="flex gap-2 shrink-0">
