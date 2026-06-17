@@ -15,9 +15,10 @@ import { dashboardApi, projectsApi } from '../../api';
 import StatCard from '../../components/ui/StatCard';
 import ProgressBar from '../../components/ui/ProgressBar';
 import InsightPanel from '../../components/InsightPanel';
-import { getCurrentFiscalYear } from '../../utils/fiscalYear';
+import { getCurrentFiscalYear, formatFiscalYearShort } from '../../utils/fiscalYear';
 
 const FISCAL_YEAR = getCurrentFiscalYear();
+const FISCAL_YEAR_SHORT = formatFiscalYearShort(FISCAL_YEAR);
 
 // Institution logo map (code → public path)
 const LOGO_MAP = {
@@ -74,8 +75,9 @@ function FlagHeader() {
       <div className="absolute inset-0 bg-black/30" />
       <div className="relative z-10 flex flex-col md:flex-row items-center justify-between px-6 py-5 gap-3">
         <div>
-          <div className="text-white text-xl font-bold tracking-wide drop-shadow">Ministry of Industry and Trade</div>
-          <div className="text-white/80 text-sm mt-1">United Republic of Tanzania · M&E Dashboard · FY {FISCAL_YEAR}</div>
+          <div className="text-white/90 text-sm font-semibold tracking-wide uppercase drop-shadow">United Republic of Tanzania</div>
+          <div className="text-white text-xl font-bold tracking-wide drop-shadow mt-0.5">Ministry of Industry and Trade</div>
+          <div className="text-white/80 text-sm mt-1">M&amp;E Dashboard · FY {FISCAL_YEAR_SHORT}</div>
         </div>
         <div className="flex items-center gap-2">
           <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full border border-white/30 backdrop-blur">

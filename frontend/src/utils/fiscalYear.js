@@ -14,6 +14,16 @@ export function getCurrentFiscalYear() {
 }
 
 /**
+ * Formats a fiscal-year string for display as "YYYY/YY".
+ *   "2025-2026" → "2025/26"
+ * Falls back to the input unchanged if it isn't in the expected form.
+ */
+export function formatFiscalYearShort(fy) {
+  const m = /^(\d{4})-(\d{4})$/.exec(String(fy ?? ''));
+  return m ? `${m[1]}/${m[2].slice(2)}` : String(fy ?? '');
+}
+
+/**
  * Returns an array of fiscal year strings covering a range of years
  * relative to the current fiscal year (useful for year-picker dropdowns).
  * @param {number} pastYears   – how many years back to include (default 3)
