@@ -5,6 +5,12 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Backend target for the REST API. Defaults to the Laravel backend (:8000).
+// (Override with API_TARGET=http://localhost:5000 to fall back to Node.)
+// Real-time now runs on Laravel Reverb (Echo connects directly to :8081), so the
+// old /socket.io proxy is gone.
+const API_TARGET = process.env.API_TARGET || 'http://localhost:8000';
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -40,10 +46,10 @@ export default defineConfig({
     allowedHosts: true,
     port: parseInt(process.env.PORT || '5173'),
     proxy: {
-      '/api': { target: 'http://localhost:5000', changeOrigin: true, secure: false },
-      // Realtime (socket.io) flows through the SAME origin (:5173) so it works on
-      // every network without extra firewall ports or backend CORS.
-      '/socket.io': { target: 'http://localhost:5000', ws: true, changeOrigin: true, secure: false },
+      '/api': { target: API_TARGET, changeOrigin: true, secure: false },
+      '/uploads': { target: API_TARGET, changeOrigin: true, secure: false },
+      // Real-time is served by Laravel Reverb; Laravel Echo connects directly to
+      // ws://<host>:8081, so no websocket proxy is needed here.
     },
   },
   build: {
