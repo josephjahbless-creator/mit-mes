@@ -5,11 +5,13 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Backend target for the REST API. Defaults to the Laravel backend (:8000).
-// (Override with API_TARGET=http://localhost:5000 to fall back to Node.)
-// Real-time now runs on Laravel Reverb (Echo connects directly to :8081), so the
-// old /socket.io proxy is gone.
-const API_TARGET = process.env.API_TARGET || 'http://localhost:8000';
+// Backend target for the REST API. Defaults to the Laravel backend.
+// Use 127.0.0.1 (not "localhost") on purpose: localhost resolves to IPv6 (::1)
+// first, but `php artisan serve` listens on IPv4 only, so "localhost" wastes
+// ~200ms per request on a failed IPv6 connect before falling back. 127.0.0.1
+// skips that entirely.
+// (Override with API_TARGET=http://127.0.0.1:5000 to fall back to Node.)
+const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:8000';
 
 export default defineConfig({
   plugins: [react()],
