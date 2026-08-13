@@ -10,7 +10,7 @@ import {
   LightBulbIcon,
   ChartPieIcon, ClipboardDocumentCheckIcon,
   BanknotesIcon, EnvelopeIcon, ClipboardDocumentIcon,
-  ShieldCheckIcon, ServerStackIcon, ArrowUpTrayIcon,
+  ShieldCheckIcon, ServerStackIcon, ArrowUpTrayIcon, DocumentCheckIcon,
   ViewColumnsIcon, ChevronDownIcon, ChevronRightIcon, UserPlusIcon,
   LifebuoyIcon, BellAlertIcon, SunIcon, MoonIcon, ComputerDesktopIcon,
   CpuChipIcon,
@@ -39,6 +39,7 @@ const mainNavAll = [
 const dataNavAll = [
   { name: 'Data Entry',          href: '/data-entry',                     icon: ClipboardDocumentListIcon, roles: ['all'] },
   { name: 'Bulk Import',         href: '/data-entry/import',              icon: ArrowUpTrayIcon,           roles: ['super_admin','admin','me_officer','data_collector'] },
+  { name: 'Data Collection',     href: '/data-entry/collection',          icon: DocumentCheckIcon,         roles: ['super_admin','admin','me_officer','data_collector'] },
   { name: 'Approval Queue',      href: '/data-entry/approval-queue',      icon: CheckBadgeIcon,            roles: ['super_admin','admin','me_officer'] },
   { name: 'Industry Statistics', href: '/data-entry/industry-statistics', icon: BuildingStorefrontIcon,    roles: ['super_admin','admin','me_officer'] },
   { name: 'Projects',            href: '/projects',                       icon: BriefcaseIcon,             roles: ['super_admin','admin','me_officer','data_collector'] },

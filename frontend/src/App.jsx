@@ -96,6 +96,7 @@ const CustomFormListPage    = lazy(() => import('./pages/forms/CustomFormListPag
 const CustomFormDesignerPage = lazy(() => import('./pages/forms/CustomFormDesignerPage'));
 const CustomFormSubmitPage  = lazy(() => import('./pages/forms/CustomFormSubmitPage'));
 const BulkImportPage        = lazy(() => import('./pages/data-entry/BulkImportPage'));
+const DeptCollectionPage    = lazy(() => import('./pages/data-entry/DeptCollectionPage'));
 const IndicatorLibraryPage  = lazy(() => import('./pages/indicators/IndicatorLibraryPage'));
 const InsightsPage          = lazy(() => import('./pages/insights/InsightsPage'));
 const AiAssistantPage       = lazy(() => import('./pages/insights/AiAssistantPage'));
@@ -205,6 +206,7 @@ export default function App() {
           } />
           <Route path="data-entry/submissions/:id" element={<Page><SubmissionDetailPage /></Page>} />
           <Route path="data-entry/import" element={<Page><BulkImportPage /></Page>} />
+          <Route path="data-entry/collection" element={<Page><DeptCollectionPage /></Page>} />
           <Route path="data-entry/completeness" element={
             <RequireRole roles={['super_admin', 'admin', 'me_officer']}>
               <Page><CompletenessPage /></Page>
