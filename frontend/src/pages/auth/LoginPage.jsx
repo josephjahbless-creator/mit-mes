@@ -126,28 +126,34 @@ const SLIDES = [
 ];
 
 /**
- * The national flag of Tanzania, drawn as geometry so it scales to any panel
- * shape: green upper hoist, blue lower fly, and a black diagonal band edged in
- * gold running from the lower hoist to the upper fly. Stretched to fill, since
- * it is decorative backdrop rather than a formal rendition of the flag.
+ * National backdrop for the sign-in panel: the flag's diagonal geometry (green
+ * upper hoist, blue lower fly, black band edged in gold) under a white veil,
+ * with the coat of arms as a watermark over it. Deliberately very low contrast
+ * so the form stays legible and the floating labels read cleanly against it.
  */
-function TanzaniaFlagBackdrop() {
+function NationalPanelBackdrop() {
   return (
-    <svg
-      className="absolute inset-0 h-full w-full"
-      viewBox="0 0 900 600"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <rect width="900" height="600" fill="#1EB53A" />
-      <polygon points="900,0 900,600 0,600" fill="#00A3DD" />
-      <polygon points="0,510 900,-90 900,90 0,690" fill="#FCD116" />
-      <polygon points="0,540 900,-60 900,60 0,660" fill="#000000" />
-    </svg>
+    <div className="pointer-events-none absolute inset-0 select-none overflow-hidden" aria-hidden="true">
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 600 900" preserveAspectRatio="none">
+        <rect width="600" height="900" fill="#1EB53A" />
+        <polygon points="600,0 600,900 0,900" fill="#00A3DD" />
+        <polygon points="0,760 600,-140 600,140 0,1040" fill="#FCD116" />
+        <polygon points="0,820 600,-80 600,80 0,980" fill="#000000" />
+      </svg>
+      {/* Veil: keeps the flag as a wash rather than a block of colour */}
+      <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.93)' }} />
+      <img
+        src="/tanzania-emblem.svg"
+        alt=""
+        className="absolute left-1/2 top-1/2 w-[135%] max-w-none -translate-x-1/2 -translate-y-1/2 object-contain"
+        style={{ opacity: 0.035 }}
+        onError={e => { e.currentTarget.style.display = 'none'; }}
+      />
+    </div>
   );
 }
 
-function BackgroundSlideshow({ overlayClass = 'bg-black/55', underlay = null, slideOpacity = 1, emblem = null }) {
+function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
   const [current, setCurrent] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef(null);
@@ -193,9 +199,6 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55', underlay = null, sl
 
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {/* Optional backdrop painted behind the photographs (e.g. the flag) */}
-      {underlay}
-
       {/* Slides: render all, only current is visible */}
       {SLIDES.map((s, i) => (
         <div
@@ -203,7 +206,7 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55', underlay = null, sl
           className="absolute inset-0 bg-cover bg-center transition-opacity duration-700"
           style={{
             backgroundImage: `url(${s.url})`,
-            opacity: i === current && !transitioning ? slideOpacity : 0,
+            opacity: i === current && !transitioning ? 1 : 0,
             zIndex: i === current ? 1 : 0,
           }}
         />
@@ -211,9 +214,6 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55', underlay = null, sl
 
       {/* Tint overlay — kept light on the split layout so the photo stays vivid */}
       <div className={`absolute inset-0 ${overlayClass}`} style={{ zIndex: 2 }} />
-
-      {/* Emblem / wordmark layer — above the imagery, below the controls */}
-      {emblem}
 
       {/* ── Left arrow ── */}
       <button
@@ -667,8 +667,11 @@ export default function LoginPage() {
       {showSupport   && <SupportModal         onClose={() => setShowSupport(false)} />}
 
       {/* ── Left: sign-in panel ─────────────────────────────────────────── */}
-      <div className="flex w-full flex-col justify-center overflow-y-auto px-6 py-10 sm:px-12 lg:w-[38%] lg:min-w-[430px] lg:max-w-[560px]">
-        <div className="mx-auto w-full max-w-sm">
+      <div className="relative flex w-full flex-col justify-center overflow-y-auto px-6 py-10 sm:px-12 lg:w-[38%] lg:min-w-[430px] lg:max-w-[560px]">
+
+        <NationalPanelBackdrop />
+
+        <div className="relative z-10 mx-auto w-full max-w-sm">
 
           {/* Emblem badge */}
           <div className="mx-auto mb-6 flex h-32 w-32 items-center justify-center rounded-full"
@@ -820,40 +823,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* ── Right: national backdrop (desktop only) ──────────────────────── */}
+      {/* ── Right: photography panel (desktop only) ─────────────────────── */}
       <div className="relative hidden flex-1 overflow-hidden lg:block">
-        <BackgroundSlideshow
-          underlay={<TanzaniaFlagBackdrop />}
-          slideOpacity={0.32}
-          overlayClass="bg-black/25"
-          emblem={
-            <div
-              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8"
-              style={{ zIndex: 3 }}
-            >
-              <img
-                src="/tanzania-emblem.svg"
-                alt=""
-                aria-hidden="true"
-                className="w-56 max-w-[45%] object-contain xl:w-72"
-                style={{ filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }}
-                onError={e => { e.currentTarget.style.display = 'none'; }}
-              />
-              <p
-                className="mt-6 text-center font-bold uppercase text-white"
-                style={{ letterSpacing: '0.22em', fontSize: '15px', textShadow: '0 2px 10px rgba(0,0,0,0.6)' }}
-              >
-                United Republic of Tanzania
-              </p>
-              <p
-                className="mt-1.5 text-center text-white/85"
-                style={{ letterSpacing: '0.08em', fontSize: '13px', textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}
-              >
-                Ministry of Industry &amp; Trade
-              </p>
-            </div>
-          }
-        />
+        <BackgroundSlideshow overlayClass="bg-black/10" />
       </div>
     </div>
   );
