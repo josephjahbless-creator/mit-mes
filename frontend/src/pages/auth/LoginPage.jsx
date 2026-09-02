@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { EyeIcon, EyeSlashIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon, TicketIcon, ShieldCheckIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
+import { EyeIcon, EyeSlashIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon, TicketIcon, ShieldCheckIcon, CheckCircleIcon, UserIcon } from '@heroicons/react/24/outline';
 import { authApi, helpdeskApi, twoFactorApi } from '../../api';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
@@ -125,7 +125,7 @@ const SLIDES = [
   },
 ];
 
-function BackgroundSlideshow() {
+function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
   const [current, setCurrent] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef(null);
@@ -184,8 +184,8 @@ function BackgroundSlideshow() {
         />
       ))}
 
-      {/* Dark overlay */}
-      <div className="absolute inset-0 bg-black/55" style={{ zIndex: 2 }} />
+      {/* Tint overlay — kept light on the split layout so the photo stays vivid */}
+      <div className={`absolute inset-0 ${overlayClass}`} style={{ zIndex: 2 }} />
 
       {/* ── Left arrow ── */}
       <button
@@ -633,41 +633,39 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
+    <div className="flex min-h-screen bg-white">
       {showForgot    && <ForgotPasswordModal  onClose={() => setShowForgot(false)} />}
       {showRegister  && <RequestAccountModal  onClose={() => setShowRegister(false)} />}
       {showSupport   && <SupportModal         onClose={() => setShowSupport(false)} />}
 
-      {/* Full-screen background slideshow */}
-      <BackgroundSlideshow />
+      {/* ── Left: sign-in panel ─────────────────────────────────────────── */}
+      <div className="flex w-full flex-col justify-center overflow-y-auto px-6 py-10 sm:px-12 lg:w-[38%] lg:min-w-[430px] lg:max-w-[560px]">
+        <div className="mx-auto w-full max-w-sm">
 
-      {/* Centered login card */}
-      <div className="relative z-10 w-full max-w-md">
-        {/* Branding — matches Watumishi Portal hierarchy */}
-        <div className="flex items-center justify-center gap-4 mb-6">
-          <img
-            src="/tanzania-emblem.svg"
-            alt="Tanzania National Emblem"
-            className="w-16 h-16 object-contain drop-shadow-lg flex-shrink-0"
-            onError={e => { e.currentTarget.style.display = 'none'; }}
-          />
-          <div>
-            <p className="text-white font-extrabold leading-tight drop-shadow-md" style={{ fontSize: '18px', letterSpacing: '1.5px' }}>
-              United Republic of Tanzania
-            </p>
-            <p className="text-white/85 font-medium drop-shadow mt-0.5" style={{ fontSize: '13px', letterSpacing: '0.5px' }}>
-              Ministry of Industry &amp; Trade
-            </p>
-            <p className="font-bold drop-shadow-md mt-1" style={{ color: '#F0B90B', fontSize: '14px', letterSpacing: '1.5px' }}>
-              M&amp;E System
-            </p>
+          {/* Emblem badge */}
+          <div className="mx-auto mb-6 flex h-32 w-32 items-center justify-center rounded-full"
+               style={{ background: '#EDF2F7' }}>
+            <img
+              src="/tanzania-emblem.svg"
+              alt="Tanzania National Emblem"
+              className="h-24 w-24 object-contain"
+              onError={e => { e.currentTarget.style.display = 'none'; }}
+            />
           </div>
-        </div>
 
-        {/* Glass card */}
-        <div className="rounded-2xl shadow-2xl overflow-hidden"
-          style={{ background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(12px)' }}>
-          <div className="p-8">
+          {/* Wordmark */}
+          <p className="text-center text-xl font-normal leading-snug text-gray-500">
+            The United Republic of<br />Tanzania
+          </p>
+          <p className="mt-1 text-center text-sm text-gray-400">
+            Ministry of Industry &amp; Trade
+          </p>
+          <h1 className="mt-2 text-center text-[34px] font-bold leading-tight text-slate-800"
+              style={{ letterSpacing: '0.12em' }}>
+            M&amp;E System
+          </h1>
+
+          <div className="mt-10">
             {twoFaStep ? (
               <TwoFAStep
                 userId={pendingUserId}
@@ -675,68 +673,111 @@ export default function LoginPage() {
               />
             ) : (
             <>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Sign in to your account</h2>
-
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+              {/* Email */}
               <div>
-                <label className="label">Email address</label>
-                <input
-                  type="email"
-                  className="input"
-                  placeholder="your.email@mit.go.tz"
-                  {...register('email', { required: 'Email is required' })}
-                />
-                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="label mb-0">Password</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowForgot(true)}
-                    className="text-xs text-mit-blue hover:underline font-medium"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
                 <div className="relative">
                   <input
+                    id="login-email"
+                    type="email"
+                    placeholder=" "
+                    className={`peer h-14 w-full rounded border bg-transparent px-4 pr-11 text-[15px] text-slate-800
+                      outline-none transition-colors placeholder-transparent
+                      ${errors.email
+                        ? 'border-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:border-[#3F51B5]'}`}
+                    {...register('email', { required: 'Email address is required' })}
+                  />
+                  <label
+                    htmlFor="login-email"
+                    className={`pointer-events-none absolute left-3 -translate-y-1/2 bg-white px-1
+                      transition-all duration-150
+                      top-0 text-xs
+                      peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-[15px]
+                      peer-focus:top-0 peer-focus:text-xs
+                      ${errors.email ? 'text-red-500 peer-focus:text-red-500' : 'text-gray-500 peer-focus:text-[#3F51B5]'}`}
+                  >
+                    Email address*
+                  </label>
+                  <UserIcon className={`pointer-events-none absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2
+                    ${errors.email ? 'text-red-400' : 'text-gray-400'}`} />
+                </div>
+                {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email.message}</p>}
+              </div>
+
+              {/* Password */}
+              <div>
+                <div className="relative">
+                  <input
+                    id="login-password"
                     type={showPassword ? 'text' : 'password'}
-                    className="input pr-10"
-                    placeholder="Enter your password"
+                    placeholder=" "
+                    className={`peer h-14 w-full rounded border bg-transparent px-4 pr-11 text-[15px] text-slate-800
+                      outline-none transition-colors placeholder-transparent
+                      ${errors.password
+                        ? 'border-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:border-[#3F51B5]'}`}
                     {...register('password', { required: 'Password is required' })}
                   />
+                  <label
+                    htmlFor="login-password"
+                    className={`pointer-events-none absolute left-3 -translate-y-1/2 bg-white px-1
+                      transition-all duration-150
+                      top-0 text-xs
+                      peer-placeholder-shown:top-1/2 peer-placeholder-shown:text-[15px]
+                      peer-focus:top-0 peer-focus:text-xs
+                      ${errors.password ? 'text-red-500 peer-focus:text-red-500' : 'text-gray-500 peer-focus:text-[#3F51B5]'}`}
+                  >
+                    Password*
+                  </label>
                   <button
                     type="button"
                     tabIndex={-1}
                     onClick={() => setShowPassword(v => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                    {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
                   </button>
                 </div>
-                {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>}
+                {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password.message}</p>}
               </div>
 
-              <button type="submit" className="btn-primary w-full justify-center mt-2" disabled={isSubmitting}>
-                {isSubmitting ? 'Signing in...' : 'Sign In'}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full rounded py-4 text-[15px] font-bold uppercase tracking-wider text-white
+                  shadow-md transition-colors disabled:opacity-60"
+                style={{ background: isSubmitting ? '#7986CB' : '#3F51B5' }}
+                onMouseEnter={e => { if (!isSubmitting) e.currentTarget.style.background = '#36459C'; }}
+                onMouseLeave={e => { if (!isSubmitting) e.currentTarget.style.background = '#3F51B5'; }}
+              >
+                {isSubmitting ? 'Signing in…' : 'Login'}
               </button>
             </form>
 
-            <div className="mt-4 pt-4 border-t space-y-2 text-center">
+            <div className="mt-6 text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-[15px] text-gray-500 hover:text-[#3F51B5] hover:underline"
+              >
+                Forgot Password?
+              </button>
+            </div>
+
+            <div className="mt-8 space-y-1.5 border-t pt-5 text-center">
               <p className="text-sm text-gray-500">
                 Need access?{' '}
                 <button type="button" onClick={() => setShowRegister(true)}
-                  className="text-mit-blue font-semibold hover:underline">
+                  className="font-semibold text-[#3F51B5] hover:underline">
                   Request an account
                 </button>
               </p>
               <p className="text-sm text-gray-500">
                 Need help?{' '}
                 <button type="button" onClick={() => setShowSupport(true)}
-                  className="text-mit-blue font-semibold hover:underline">
+                  className="font-semibold text-[#3F51B5] hover:underline">
                   Contact Support
                 </button>
               </p>
@@ -744,11 +785,16 @@ export default function LoginPage() {
             </>
             )}
           </div>
-        </div>
 
-        <p className="text-center text-white/50 text-xs mt-5">
-          &copy; {new Date().getFullYear()} Ministry of Industry and Trade
-        </p>
+          <p className="mt-8 text-center text-xs text-gray-400">
+            &copy; {new Date().getFullYear()} Ministry of Industry and Trade
+          </p>
+        </div>
+      </div>
+
+      {/* ── Right: photography panel (desktop only) ─────────────────────── */}
+      <div className="relative hidden flex-1 overflow-hidden lg:block">
+        <BackgroundSlideshow overlayClass="bg-black/10" />
       </div>
     </div>
   );
