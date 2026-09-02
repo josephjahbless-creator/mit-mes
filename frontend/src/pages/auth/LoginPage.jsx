@@ -125,7 +125,29 @@ const SLIDES = [
   },
 ];
 
-function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
+/**
+ * The national flag of Tanzania, drawn as geometry so it scales to any panel
+ * shape: green upper hoist, blue lower fly, and a black diagonal band edged in
+ * gold running from the lower hoist to the upper fly. Stretched to fill, since
+ * it is decorative backdrop rather than a formal rendition of the flag.
+ */
+function TanzaniaFlagBackdrop() {
+  return (
+    <svg
+      className="absolute inset-0 h-full w-full"
+      viewBox="0 0 900 600"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <rect width="900" height="600" fill="#1EB53A" />
+      <polygon points="900,0 900,600 0,600" fill="#00A3DD" />
+      <polygon points="0,510 900,-90 900,90 0,690" fill="#FCD116" />
+      <polygon points="0,540 900,-60 900,60 0,660" fill="#000000" />
+    </svg>
+  );
+}
+
+function BackgroundSlideshow({ overlayClass = 'bg-black/55', underlay = null, slideOpacity = 1, emblem = null }) {
   const [current, setCurrent] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef(null);
@@ -171,6 +193,9 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
 
   return (
     <div className="absolute inset-0 overflow-hidden">
+      {/* Optional backdrop painted behind the photographs (e.g. the flag) */}
+      {underlay}
+
       {/* Slides: render all, only current is visible */}
       {SLIDES.map((s, i) => (
         <div
@@ -178,7 +203,7 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
           className="absolute inset-0 bg-cover bg-center transition-opacity duration-700"
           style={{
             backgroundImage: `url(${s.url})`,
-            opacity: i === current && !transitioning ? 1 : 0,
+            opacity: i === current && !transitioning ? slideOpacity : 0,
             zIndex: i === current ? 1 : 0,
           }}
         />
@@ -186,6 +211,9 @@ function BackgroundSlideshow({ overlayClass = 'bg-black/55' }) {
 
       {/* Tint overlay — kept light on the split layout so the photo stays vivid */}
       <div className={`absolute inset-0 ${overlayClass}`} style={{ zIndex: 2 }} />
+
+      {/* Emblem / wordmark layer — above the imagery, below the controls */}
+      {emblem}
 
       {/* ── Left arrow ── */}
       <button
@@ -792,9 +820,40 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* ── Right: photography panel (desktop only) ─────────────────────── */}
+      {/* ── Right: national backdrop (desktop only) ──────────────────────── */}
       <div className="relative hidden flex-1 overflow-hidden lg:block">
-        <BackgroundSlideshow overlayClass="bg-black/10" />
+        <BackgroundSlideshow
+          underlay={<TanzaniaFlagBackdrop />}
+          slideOpacity={0.32}
+          overlayClass="bg-black/25"
+          emblem={
+            <div
+              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8"
+              style={{ zIndex: 3 }}
+            >
+              <img
+                src="/tanzania-emblem.svg"
+                alt=""
+                aria-hidden="true"
+                className="w-56 max-w-[45%] object-contain xl:w-72"
+                style={{ filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }}
+                onError={e => { e.currentTarget.style.display = 'none'; }}
+              />
+              <p
+                className="mt-6 text-center font-bold uppercase text-white"
+                style={{ letterSpacing: '0.22em', fontSize: '15px', textShadow: '0 2px 10px rgba(0,0,0,0.6)' }}
+              >
+                United Republic of Tanzania
+              </p>
+              <p
+                className="mt-1.5 text-center text-white/85"
+                style={{ letterSpacing: '0.08em', fontSize: '13px', textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}
+              >
+                Ministry of Industry &amp; Trade
+              </p>
+            </div>
+          }
+        />
       </div>
     </div>
   );
